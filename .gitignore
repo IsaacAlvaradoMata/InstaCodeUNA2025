@@ -1,0 +1,37 @@
+# --- Compilación ---
+*.o
+*.obj
+*.a
+*.so
+*.dll
+*.exe
+*.out
+*.app
+*.dSYM/
+
+# --- Qt autogenerados ---
+moc_*.cpp
+moc_*.o
+qrc_*.cpp
+ui_*.h
+
+# --- Makefiles generados ---
+Makefile
+Makefile.*
+*.pro.user
+*.qmake.stash
+*.qmake.cache
+
+# --- VS Code Insiders ---
+.vscode/
+c_cpp_properties.json
+
+# --- Archivos temporales de macOS ---
+.DS_Store
+._*
+
+# --- Archivos de prueba o temporales ---
+*.log
+*.tmp
+*.bak
+*~
