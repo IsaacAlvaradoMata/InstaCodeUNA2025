@@ -1,0 +1,11 @@
+<!DOCTYPE RCC><RCC version="1.0">
+<qresource prefix="/">
+    <file>light.qss</file>
+    <file>dark.qss</file>
+    <file>images/AppLogo.png</file>
+    <file>images/folder.png</file>
+    <file>images/settings.png</file>
+    <file>images/downloads.png</file>
+     <file>images/themeChange.png</file>
+</qresource>
+</RCC>

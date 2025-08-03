@@ -11,3 +11,5 @@ SOURCES += main.cpp \
 
 HEADERS += window.h \
            parser.h
+
+RESOURCES += resources.qrc

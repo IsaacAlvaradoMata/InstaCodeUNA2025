@@ -18,19 +18,25 @@ public:
     ~Window();
 
 private slots:
-    void loadFile();         // Cargar archivo .txt
-    void convertToCpp();     // Convertir texto a código C++
-    void exportCppFile();    // Exportar código a archivo .cpp
+    void loadFile();
+    void convertToCpp();
+    void exportCppFile();
+    void toggleTheme(); // <-- DECLARACIÓN DEL NUEVO SLOT
 
 private:
-    // Elementos de la interfaz
-    QTextEdit *inputTextEdit;     // Donde se muestra el .txt
-    QTextEdit *outputTextEdit;    // Donde se muestra el código C++
-    QPushButton *loadButton;      // Botón: Cargar .txt
-    QPushButton *convertButton;   // Botón: Convertir a C++
-    QPushButton *exportButton;    // Botón: Exportar .cpp
+    void setupUI();
+    void applyStylesheet(const QString &path); // <-- DECLARACIÓN DEL NUEVO MÉTODO
 
-    void setupUI();               // Método privado para construir la interfaz
+    // Widgets
+    QTextEdit *inputTextEdit;
+    QTextEdit *outputTextEdit;
+    QPushButton *loadButton;
+    QPushButton *convertButton;
+    QPushButton *exportButton;
+    QPushButton *themeButton; // <-- DECLARACIÓN DEL NUEVO BOTÓN
+
+    // Variables de estado
+    bool isDarkTheme;         // <-- DECLARACIÓN DEL FLAG DE TEMA
 };
 
 #endif // WINDOW_H

@@ -1,0 +1,53 @@
+/* filepath: /Users/crossac09/Documents/GitHub/InstaCodeUNA2025/InstaCodeUNA/dark.qss */
+/* --- Tema Oscuro --- */
+
+/* Ventana Principal */
+QMainWindow {
+    background-color: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                      stop: 0 #2c3e50, stop: 1 #34495e);
+}
+
+/* Cuadros de Texto */
+QTextEdit {
+    background-color: #2d2d2d;
+    color: #f0f0f0;
+    border: 1px solid #555;
+    border-radius: 5px;
+    padding: 10px;
+    font-size: 14px;
+}
+QTextEdit:focus {
+    border: 1px solid #3498db;
+}
+
+/* Botones */
+QPushButton {
+    padding: 8px;
+    font-size: 14px;
+    border: 1px solid #555;
+    border-radius: 4px;
+    color: black; /* Texto claro */
+}
+
+#loadButton { background-color: #3498db; }
+#loadButton:hover { background-color: #5dade2; }
+#loadButton:pressed { background-color: #2e86c1; }
+
+#convertButton { background-color: #2ecc71; }
+#convertButton:hover { background-color: #58d68d; }
+#convertButton:pressed { background-color: #28b463; }
+
+#exportButton { background-color: #e67e22; }
+#exportButton:hover { background-color: #eb984e; }
+#exportButton:pressed { background-color: #d35400; }
+
+#themeButton { background-color: #8e44ad; }
+#themeButton:hover { background-color: #9b59b6; }
+#themeButton:pressed { background-color: #8034a1 }
+
+
+/* Botón de Tema (para que no tenga fondo) */
+#themeButton {
+    background-color: transparent;
+    border: none;
+}
