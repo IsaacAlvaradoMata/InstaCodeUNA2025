@@ -1,72 +1,112 @@
 #include "window.h"
-#include "parser.h"
-
-#include <QVBoxLayout>
-#include <QHBoxLayout>
-#include <QPushButton>
 #include <QFileDialog>
 #include <QFile>
 #include <QTextStream>
+#include <QMessageBox>
+#include <QLabel>
+#include <QSpacerItem>
 
-ConverterWindow::ConverterWindow(QWidget *parent)
-    : QWidget(parent) {
-    // Crear los editores de texto
-    inputText = new QTextEdit(this);
-    outputText = new QTextEdit(this);
-
-    // Desactivar edición en la salida
-    outputText->setReadOnly(true);
-
-    // Crear botones
-    loadButton = new QPushButton("Cargar archivo", this);
-    convertButton = new QPushButton("Convertir a C++", this);
-
-    // Crear layouts
-    QHBoxLayout *mainLayout = new QHBoxLayout();       // Layout horizontal para las dos vistas
-    QVBoxLayout *leftLayout = new QVBoxLayout();       // Vista izquierda: archivo original
-    QVBoxLayout *rightLayout = new QVBoxLayout();      // Vista derecha: salida C++
-    QHBoxLayout *buttonLayout = new QHBoxLayout();     // Botones al fondo
-
-    // Agregar los QTextEdit a sus lados
-    leftLayout->addWidget(inputText);
-    rightLayout->addWidget(outputText);
-
-    // Agregar ambos lados al layout principal
-    mainLayout->addLayout(leftLayout, 1);
-    mainLayout->addLayout(rightLayout, 1);
-
-    // Agregar los botones al layout inferior
-    buttonLayout->addWidget(loadButton);
-    buttonLayout->addStretch();
-    buttonLayout->addWidget(convertButton);
-
-    // Combinar layouts en layout final vertical
-    QVBoxLayout *finalLayout = new QVBoxLayout(this);
-    finalLayout->addLayout(mainLayout);
-    finalLayout->addLayout(buttonLayout);
-
-    // Aplicar layout final al widget
-    setLayout(finalLayout);
-
-    // Conectar eventos
-    connect(loadButton, &QPushButton::clicked, this, &ConverterWindow::loadFile);
-    connect(convertButton, &QPushButton::clicked, this, &ConverterWindow::convertToCpp);
+Window::Window(QWidget *parent)
+    : QMainWindow(parent) {
+    setupUI();
 }
 
-void ConverterWindow::loadFile() {
-    QString fileName = QFileDialog::getOpenFileName(this, "Seleccionar archivo", "", "Archivos de texto (*.txt)");
+Window::~Window() {}
+
+void Window::setupUI() {
+    // --- Título ---
+    QLabel *titleLabel = new QLabel("🧠 InstaCodeUNA");
+    titleLabel->setAlignment(Qt::AlignCenter);
+    titleLabel->setStyleSheet("font-size: 24px; font-weight: bold; padding: 10px;");
+
+    // --- Widgets de texto ---
+    inputTextEdit = new QTextEdit;
+    outputTextEdit = new QTextEdit;
+    inputTextEdit->setPlaceholderText("📄 Aquí aparecerá el contenido del archivo .txt");
+    outputTextEdit->setPlaceholderText("💻 Aquí se generará el código C++");
+
+    // --- Estilo texto ---
+    QString editStyle = "padding: 10px; font-size: 14px;";
+    inputTextEdit->setStyleSheet(editStyle);
+    outputTextEdit->setStyleSheet(editStyle);
+
+    // --- Botones ---
+    loadButton = new QPushButton("📂 Cargar archivo .txt");
+    convertButton = new QPushButton("⚙️ Convertir a C++");
+    exportButton = new QPushButton("⬇️ Exportar archivo .cpp");
+
+    QString buttonStyle = "padding: 8px; font-size: 14px;";
+    loadButton->setStyleSheet(buttonStyle);
+    convertButton->setStyleSheet(buttonStyle);
+    exportButton->setStyleSheet(buttonStyle);
+
+    // --- Layout izquierdo (texto + botones) ---
+    QVBoxLayout *leftLayout = new QVBoxLayout;
+    leftLayout->addWidget(inputTextEdit);
+    leftLayout->addWidget(loadButton);
+    leftLayout->addWidget(convertButton);
+
+    // --- Layout derecho (texto + botón) ---
+    QVBoxLayout *rightLayout = new QVBoxLayout;
+    rightLayout->addWidget(outputTextEdit);
+    rightLayout->addWidget(exportButton);
+
+    // --- Layout horizontal central ---
+    QHBoxLayout *centerLayout = new QHBoxLayout;
+    centerLayout->addLayout(leftLayout);
+    centerLayout->addLayout(rightLayout);
+
+    // --- Layout principal ---
+    QVBoxLayout *mainLayout = new QVBoxLayout;
+    mainLayout->addWidget(titleLabel);
+    mainLayout->addLayout(centerLayout);
+
+    // --- Central widget ---
+    QWidget *centralWidget = new QWidget(this);
+    centralWidget->setLayout(mainLayout);
+    setCentralWidget(centralWidget);
+
+    // --- Configuración de ventana ---
+    setWindowTitle("InstaCodeUNA - Convertidor de Lenguaje Natural a C++");
+    resize(900, 600);
+
+    // --- Conectar botones ---
+    connect(loadButton, &QPushButton::clicked, this, &Window::loadFile);
+    connect(convertButton, &QPushButton::clicked, this, &Window::convertToCpp);
+    connect(exportButton, &QPushButton::clicked, this, &Window::exportCppFile);
+}
+
+void Window::loadFile() {
+    QString fileName = QFileDialog::getOpenFileName(this, "Seleccionar archivo de texto", "", "Text Files (*.txt)");
     if (!fileName.isEmpty()) {
         QFile file(fileName);
         if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
             QTextStream in(&file);
-            inputText->setPlainText(in.readAll());
-            file.close();
+            inputTextEdit->setPlainText(in.readAll());
+        } else {
+            QMessageBox::warning(this, "Error", "No se pudo abrir el archivo.");
         }
     }
 }
 
-void ConverterWindow::convertToCpp() {
-    QString input = inputText->toPlainText();
-    QString converted = Parser::convert(input);  // Usa la lógica del parser
-    outputText->setPlainText(converted);
+void Window::convertToCpp() {
+    QString input = inputTextEdit->toPlainText();
+    // Por ahora solo se copia con encabezado
+    QString output = "// Código C++ generado por InstaCodeUNA\n\n" + input;
+    outputTextEdit->setPlainText(output);
+}
+
+void Window::exportCppFile() {
+    QString fileName = QFileDialog::getSaveFileName(this, "Guardar archivo como", "codigo_generado.cpp", "C++ Files (*.cpp)");
+    if (!fileName.isEmpty()) {
+        QFile file(fileName);
+        if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+            QTextStream out(&file);
+            out << outputTextEdit->toPlainText();
+            file.close();
+            QMessageBox::information(this, "Éxito", "Archivo exportado correctamente.");
+        } else {
+            QMessageBox::warning(this, "Error", "No se pudo guardar el archivo.");
+        }
+    }
 }

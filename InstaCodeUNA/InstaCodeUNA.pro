@@ -11,6 +11,3 @@ SOURCES += main.cpp \
 
 HEADERS += window.h \
            parser.h
-
-INCLUDEPATH += /usr/local/Cellar/qt/6.9.1/include
-LIBS += -L/usr/local/Cellar/qt/6.9.1/lib

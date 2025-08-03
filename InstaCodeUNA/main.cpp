@@ -4,7 +4,7 @@
 int main(int argc, char *argv[]) {
     QApplication app(argc, argv);
 
-    ConverterWindow window;
+    Window window;
     window.setWindowTitle("InstaCodeUNA");
     window.resize(900, 500);
     window.show();
