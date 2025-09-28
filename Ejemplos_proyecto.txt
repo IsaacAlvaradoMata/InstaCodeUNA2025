@@ -1,0 +1,23 @@
+Lenguaje Natural:
+
+Ejemplo#1
+Crear un vector de números enteros con 5 elementos.
+Pedir al usuario que ingrese cada número por consola.
+Guardar los números en el vector.
+Imprimir todos los elementos del vector en pantalla.
+
+
+Ejemplo#2
+Crear una lista de texto para guardar los países.
+Crear una lista de texto para guardar las capitales.
+Leer los datos desde un archivo llamado datos.txt.
+Imprimir los países y las capitales en pantalla.
+
+Archivo TXT:
+Costa Rica,San José
+México,Ciudad de México
+España,Madrid
+Francia,París
+Alemania,Berlín
+
+

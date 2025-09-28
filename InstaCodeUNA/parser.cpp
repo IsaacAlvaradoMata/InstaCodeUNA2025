@@ -116,7 +116,8 @@ enum class BlockType { Generic, If, Loop };
 struct BlockState {
     BlockType type = BlockType::Generic;
     bool autoClose = false; // true: close before next non-else instruction
-    bool hasElse = false;
+    bool hasElse = false;   // true only for final "sino" (else), not "sino si" (else if)
+    bool hasElseIf = false; // true if we've used "sino si" (else if)
     int indent = 0;
 };
 
@@ -361,7 +362,9 @@ private:
 
     void startBlock(const QString &header, BlockType type, bool autoClose = false, int indentLevel = 0) {
         m_codeLines.append(indent() + header);
-        m_blocks.push_back({type, autoClose, false, indentLevel});
+        m_blocks.push_back({type, autoClose, false, false, indentLevel});
+        //                                    ↑      ↑       ↑
+        //                               hasElse hasElseIf indent
         ++m_indentLevel;
     }
 
@@ -509,11 +512,16 @@ private:
     }
 
     bool handleCreateVariable(const QString &original, const QString &normalized) {
-        if (!normalized.startsWith(QStringLiteral("crear variable"))) {
+        QString keyword;
+        if (normalized.startsWith(QStringLiteral("crear variable"))) {
+            keyword = QStringLiteral("crear variable");
+        } else if (normalized.startsWith(QStringLiteral("definir variable"))) {
+            keyword = QStringLiteral("definir variable");
+        } else {
             return false;
         }
 
-        QString rest = normalized.mid(QStringLiteral("crear variable").size()).trimmed();
+        QString rest = normalized.mid(keyword.size()).trimmed();
         QString typeToken;
         QString nameToken;
         QString valueToken;
@@ -641,13 +649,24 @@ private:
             namePart = namePart.mid(3).trimmed();
         }
 
+        // Handle "valor de [variable]" pattern
+        if (namePart.startsWith(QStringLiteral("valor de "))) {
+            namePart = namePart.mid(QStringLiteral("valor de ").size()).trimmed();
+        }
+
         QString identifier = sanitizedIdentifier(namePart);
         if (!hasVariable(identifier)) {
             // Determine type from value
             QString varType = QStringLiteral("int");
             QString initialValue = QStringLiteral("0");
             
-            if (valuePart == QStringLiteral("verdadero") || 
+            // Check if value is quoted string
+            QString quotedText = readQuotedText(original);
+            if (!quotedText.isEmpty()) {
+                varType = QStringLiteral("std::string");
+                initialValue = QStringLiteral("\"\"");
+                ensureInclude("string");
+            } else if (valuePart == QStringLiteral("verdadero") || 
                 valuePart == QStringLiteral("falso") ||
                 valuePart == QStringLiteral("true") || 
                 valuePart == QStringLiteral("false")) {
@@ -661,7 +680,15 @@ private:
             ensureVariable(identifier, varType, initialValue);
         }
 
-        QString valueExpr = translateExpression(valuePart, original);
+        // Handle quoted strings properly
+        QString valueExpr;
+        QString quotedText = readQuotedText(original);
+        if (!quotedText.isEmpty()) {
+            valueExpr = quoted(quotedText);
+        } else {
+            valueExpr = translateExpression(valuePart, original);
+        }
+        
         addCodeLine(QStringLiteral("%1 = %2;").arg(identifier, valueExpr));
         return true;
     }
@@ -674,17 +701,62 @@ private:
 
         QString rest = normalized.mid(QStringLiteral("definir funcion").size()).trimmed();
         
-        // Parse: "numero entero factorial con parametro numero entero n"
-        QRegularExpression re(QStringLiteral("^([a-z ]+) ([a-zA-Z_][a-zA-Z0-9_]*) con parametro ([a-z ]+) ([a-zA-Z_][a-zA-Z0-9_]*)$"));
-        QRegularExpressionMatch match = re.match(rest);
-        if (!match.hasMatch()) {
+        // Try pattern with multiple parameters first: "numero entero sumar con parametro numero entero a y numero entero b"
+        QRegularExpression multiParamRe(QStringLiteral("^([a-z ]+) ([a-zA-Z_][a-zA-Z0-9_]*) con parametro (.+)$"));
+        QRegularExpressionMatch multiMatch = multiParamRe.match(rest);
+        
+        if (multiMatch.hasMatch()) {
+            QString returnTypePhrase = multiMatch.captured(1).trimmed();
+            QString functionName = multiMatch.captured(2).trimmed();
+            QString paramsText = multiMatch.captured(3).trimmed();
+            
+            QString returnType = typeFromPhrase(returnTypePhrase);
+            
+            FunctionInfo funcInfo;
+            funcInfo.name = functionName;
+            funcInfo.returnType = returnType;
+            
+            // Parse multiple parameters separated by " y "
+            QStringList paramParts = paramsText.split(QStringLiteral(" y "));
+            
+            for (const QString &paramPart : paramParts) {
+                QString cleanParam = paramPart.trimmed();
+                // Extract type and name from "numero entero a"
+                QRegularExpression paramRe(QStringLiteral("^([a-z ]+) ([a-zA-Z_][a-zA-Z0-9_]*)$"));
+                QRegularExpressionMatch paramMatch = paramRe.match(cleanParam);
+                
+                if (paramMatch.hasMatch()) {
+                    QString paramTypePhrase = paramMatch.captured(1).trimmed();
+                    QString paramName = paramMatch.captured(2).trimmed();
+                    
+                    QString paramType = typeFromPhrase(paramTypePhrase);
+                    QString paramIdentifier = sanitizedIdentifier(paramName);
+                    
+                    funcInfo.parameterTypes << paramType;
+                    funcInfo.parameterNames << paramIdentifier;
+                    
+                    // Register parameter as available variable during function processing
+                    registerVariable(paramIdentifier, paramType, false);
+                }
+            }
+            
+            m_functions.insert(functionName, funcInfo);
+            m_insideFunction = true;
+            m_currentFunctionName = functionName;
+            return true;
+        }
+        
+        // Fallback to single parameter pattern: "numero entero factorial con parametro numero entero n"
+        QRegularExpression singleParamRe(QStringLiteral("^([a-z ]+) ([a-zA-Z_][a-zA-Z0-9_]*) con parametro ([a-z ]+) ([a-zA-Z_][a-zA-Z0-9_]*)$"));
+        QRegularExpressionMatch singleMatch = singleParamRe.match(rest);
+        if (!singleMatch.hasMatch()) {
             return false;
         }
 
-        QString returnTypePhrase = match.captured(1).trimmed();
-        QString functionName = match.captured(2).trimmed();
-        QString paramTypePhrase = match.captured(3).trimmed();
-        QString paramName = match.captured(4).trimmed();
+        QString returnTypePhrase = singleMatch.captured(1).trimmed();
+        QString functionName = singleMatch.captured(2).trimmed();
+        QString paramTypePhrase = singleMatch.captured(3).trimmed();
+        QString paramName = singleMatch.captured(4).trimmed();
 
         QString returnType = typeFromPhrase(returnTypePhrase);
         QString paramType = typeFromPhrase(paramTypePhrase);
@@ -695,6 +767,9 @@ private:
         funcInfo.returnType = returnType;
         funcInfo.parameterTypes << paramType;
         funcInfo.parameterNames << paramIdentifier;
+        
+        // Register parameter as available variable during function processing
+        registerVariable(paramIdentifier, paramType, false);
         
         m_functions.insert(functionName, funcInfo);
         m_insideFunction = true;
@@ -753,6 +828,13 @@ private:
             }
             
             m_functions[m_currentFunctionName].body.append(line);
+            
+            // Clean up parameter variables from the global variable registry
+            const FunctionInfo &funcInfo = m_functions[m_currentFunctionName];
+            for (const QString &paramName : funcInfo.parameterNames) {
+                m_variables.remove(paramName);
+            }
+            
             m_insideFunction = false;
             m_currentFunctionName.clear();
         } else {
@@ -764,6 +846,38 @@ private:
 
     bool handleFunctionCall(const QString &original, const QString &normalized) {
         Q_UNUSED(original);
+        
+        // Try pattern with multiple arguments: "asignar valor a resultado con llamar funcion sumar(x, y)"
+        QRegularExpression multiArgRe(QStringLiteral("^asignar valor a ([a-zA-Z_][a-zA-Z0-9_]*) con llamar funcion ([a-zA-Z_][a-zA-Z0-9_]*)\\(([^)]+)\\)$"));
+        QRegularExpressionMatch multiMatch = multiArgRe.match(normalized);
+        if (multiMatch.hasMatch()) {
+            QString varName = sanitizedIdentifier(multiMatch.captured(1));
+            QString funcName = multiMatch.captured(2);
+            QString argsText = multiMatch.captured(3).trimmed();
+            
+            if (!hasVariable(varName)) {
+                addCodeLine(QStringLiteral("int %1;").arg(varName));
+                registerVariable(varName, QStringLiteral("int"), false);
+            }
+            
+            // Parse multiple arguments separated by ", " or " y "
+            QStringList argParts = argsText.contains(QStringLiteral(", ")) ? 
+                                  argsText.split(QStringLiteral(", ")) : 
+                                  argsText.split(QStringLiteral(" y "));
+                                  
+            QStringList cleanArgs;
+            for (const QString &argPart : argParts) {
+                QString cleanArg = sanitizedIdentifier(argPart.trimmed());
+                if (!cleanArg.isEmpty()) {
+                    cleanArgs << cleanArg;
+                }
+            }
+            
+            addCodeLine(QStringLiteral("%1 = %2(%3);").arg(varName, funcName, cleanArgs.join(QStringLiteral(", "))));
+            return true;
+        }
+        
+        // Fallback to single argument pattern
         QRegularExpression callRe(QStringLiteral("^asignar valor a ([a-zA-Z_][a-zA-Z0-9_]*) con llamar funcion ([a-zA-Z_][a-zA-Z0-9_]*)\\(([a-zA-Z_][a-zA-Z0-9_]*)\\)$"));
         QRegularExpressionMatch callMatch = callRe.match(normalized);
         if (callMatch.hasMatch()) {
@@ -828,10 +942,11 @@ private:
         }
 
         QString rest = normalized.mid(QStringLiteral("calcular ").size()).trimmed();
-        int idxComo = rest.indexOf(QStringLiteral(" como "));
+        
+        // Try direct format: "calcular a multiplicado por b más 10 dividido entre 2 y asignar a resultado"
         int idxAsignar = rest.indexOf(QStringLiteral(" y asignar a "));
         int idxAsignarAl = rest.indexOf(QStringLiteral(" y asignar al "));
-
+        
         QString assignToken;
         if (idxAsignar >= 0) {
             assignToken = QStringLiteral(" y asignar a ");
@@ -841,17 +956,21 @@ private:
         } else {
             return false;
         }
-
-        if (idxComo < 0 || idxAsignar <= idxComo) {
-            return false;
-        }
-
-        QString exprPart = rest.mid(idxComo + QStringLiteral(" como ").size(), idxAsignar - (idxComo + QStringLiteral(" como ").size())).trimmed();
+        
+        QString exprPart = rest.left(idxAsignar).trimmed();
         QString destPart = rest.mid(idxAsignar + assignToken.size()).trimmed();
-        if (destPart.isEmpty()) {
+        
+        if (exprPart.isEmpty() || destPart.isEmpty()) {
             return false;
         }
-
+        
+        // Check if it's the old format with "como"
+        int idxComo = exprPart.indexOf(QStringLiteral(" como "));
+        if (idxComo >= 0) {
+            // Old format: "calcular X como Y y asignar a Z"
+            exprPart = exprPart.mid(idxComo + QStringLiteral(" como ").size()).trimmed();
+        }
+        
         QString dest = sanitizedIdentifier(destPart);
         if (dest.isEmpty()) {
             notifyIssue(QStringLiteral("No se pudo interpretar la variable destino en la instrucción de cálculo."));
@@ -882,7 +1001,17 @@ private:
             ensureVariable(dest, varType, defaultValue);
         }
 
-        addCodeLine(QStringLiteral("%1 = %2;").arg(dest, expr));
+        // Add assignment to appropriate location (function or main)
+        QString assignmentLine = QStringLiteral("%1 = %2;").arg(dest, expr);
+        
+        if (m_insideFunction && !m_currentFunctionName.isEmpty()) {
+            // Add to function body
+            m_functions[m_currentFunctionName].body.append(QStringLiteral("    %1").arg(assignmentLine));
+        } else {
+            // Add to main code
+            addCodeLine(assignmentLine);
+        }
+        
         return true;
     }
 
@@ -968,6 +1097,7 @@ private:
 
         normalizedExpr.replace(QStringLiteral(" mas "), QStringLiteral(" + "));
         normalizedExpr.replace(QStringLiteral(" mas"), QStringLiteral(" +"));
+        normalizedExpr.replace(QStringLiteral("mas "), QStringLiteral("+ "));
         normalizedExpr.replace(QStringLiteral("menos"), QStringLiteral("-"));
         normalizedExpr.replace(QStringLiteral(" multiplicado por "), QStringLiteral(" * "));
         normalizedExpr.replace(QStringLiteral(" dividido entre "), QStringLiteral(" / "));
@@ -1034,8 +1164,24 @@ private:
             idx = match.capturedStart() + replacement.size();
         }
 
-        processed.replace(QStringLiteral(" "), QString());
-        return processed;
+        // Don't remove all spaces immediately, first convert variables
+        QRegularExpression variablePattern(QStringLiteral("\\b([a-zA-Z_][a-zA-Z0-9_]*)\\b"));
+        QRegularExpressionMatchIterator varIterator = variablePattern.globalMatch(processed);
+        QString finalProcessed = processed;
+        
+        while (varIterator.hasNext()) {
+            QRegularExpressionMatch varMatch = varIterator.next();
+            QString varCandidate = varMatch.captured(1);
+            QString sanitizedVar = sanitizedIdentifier(varCandidate);
+            
+            // Replace variable names with sanitized versions if they exist
+            if (hasVariable(sanitizedVar) && varCandidate != sanitizedVar) {
+                finalProcessed.replace(varCandidate, sanitizedVar);
+            }
+        }
+
+        finalProcessed.replace(QStringLiteral(" "), QString());
+        return finalProcessed;
     }
 
     QString literalForType(const QString &valueText,
@@ -1400,7 +1546,7 @@ private:
             return true;
         }
 
-        // Specific pattern: lista/vector with size
+        // Pattern: lista/vector with size - specific pattern for common cases
         QRegularExpression reSize("^crear (?:una |un )?(lista|vector|arreglo) de (?:\\d+ )?([a-z ]+) con (\\d+) elementos$");
         QRegularExpressionMatch m = reSize.match(normalized);
         if (m.hasMatch()) {
@@ -1432,6 +1578,7 @@ private:
             return true;
         }
 
+        // Pattern: "crear una lista de X números Y" - more flexible
         QRegularExpression reSizeShort("^crear (?:una |un )?(lista|vector|arreglo) de (\\d+) ([a-z ]+)$");
         QRegularExpressionMatch mShort = reSizeShort.match(normalized);
         if (mShort.hasMatch()) {
@@ -1543,14 +1690,19 @@ private:
     }
 
     QString elementTypeFromPhrase(const QString &phrase) {
-        if (phrase.contains(QStringLiteral("texto"))) {
+        if (phrase.contains(QStringLiteral("texto")) || phrase.contains(QStringLiteral("cadena"))) {
             ensureInclude("string");
             return QStringLiteral("std::string");
         }
-        if (phrase.contains(QStringLiteral("decimal"))) {
+        if (phrase.contains(QStringLiteral("decimal")) || phrase.contains(QStringLiteral("decimales"))) {
             return QStringLiteral("double");
         }
-        if (phrase.contains(QStringLiteral("entero")) || phrase.contains(QStringLiteral("enteros"))) {
+        if (phrase.contains(QStringLiteral("entero")) || phrase.contains(QStringLiteral("enteros")) || 
+            phrase.contains(QStringLiteral("numeros enteros")) || phrase.contains(QStringLiteral("numero entero"))) {
+            return QStringLiteral("int");
+        }
+        // Default to int for numbers
+        if (phrase.contains(QStringLiteral("numero")) || phrase.contains(QStringLiteral("numeros"))) {
             return QStringLiteral("int");
         }
         return QStringLiteral("std::string");
@@ -2008,12 +2160,43 @@ private:
     }
 
     bool handleElse(const QString &original, const QString &normalized) {
-        Q_UNUSED(normalized);
         if (m_blocks.isEmpty() || m_blocks.last().type != BlockType::If) {
             notifyIssue(QStringLiteral("Se encontró un 'sino' sin un 'si' previo."));
             return false;
         }
 
+        // Handle "sino si" (else if) pattern - allow multiple else if
+        if (normalized.startsWith(QStringLiteral("sino si "))) {
+            // Don't allow else if after final else
+            if (m_blocks.last().hasElse) {
+                notifyIssue(QStringLiteral("No se puede usar 'sino si' después de un 'sino' final."));
+                return false;
+            }
+            
+            if (m_indentLevel > 1) {
+                --m_indentLevel;
+            }
+            
+            // Extract the condition part after "sino si "
+            QString condition = normalized.mid(QStringLiteral("sino si ").size()).trimmed();
+            QString conditionExpr = translateCondition(condition);
+            if (conditionExpr.isEmpty()) {
+                notifyIssue(QStringLiteral("No se pudo interpretar la condición del 'sino si': %1").arg(condition));
+                return true;
+            }
+            
+            // Generate proper else if syntax
+            m_codeLines.append(indent() + QStringLiteral("} else if (%1) {").arg(conditionExpr));
+            
+            // Update the current block - mark as having else if but not final else
+            ++m_indentLevel;
+            m_blocks.last().hasElseIf = true;  // Track that we've used else if
+            m_blocks.last().autoClose = true;
+            m_blocks.last().indent = m_currentIndent;
+            return true;
+        }
+
+        // Handle final "sino" (else) - only allow if no previous final else
         if (m_blocks.last().hasElse) {
             notifyIssue(QStringLiteral("El bloque 'si' ya tenía un 'sino' asociado."));
             return false;
@@ -2024,7 +2207,7 @@ private:
         }
         m_codeLines.append(indent() + QStringLiteral("} else {"));
         ++m_indentLevel;
-        m_blocks.last().hasElse = true;
+        m_blocks.last().hasElse = true;  // Now mark as having final else
         m_blocks.last().autoClose = true;
         m_blocks.last().indent = m_currentIndent;
 
@@ -2194,6 +2377,8 @@ private:
             normalized.startsWith(QStringLiteral("mostrar todos los elementos del")) ||
             normalized.startsWith(QStringLiteral("imprimir todos los elementos de")) ||
             normalized.startsWith(QStringLiteral("mostrar todos los elementos de")) ||
+            normalized.startsWith(QStringLiteral("imprimir todos los elementos de la")) ||
+            normalized.startsWith(QStringLiteral("mostrar todos los elementos de la")) ||
             (normalized.contains(QStringLiteral("imprimir")) && normalized.contains(QStringLiteral("todos los elementos")) && (normalized.contains(QStringLiteral("vector")) || normalized.contains(QStringLiteral("lista")) || normalized.contains(QStringLiteral("arreglo")))) ||
             (normalized.contains(QStringLiteral("mostrar")) && normalized.contains(QStringLiteral("todos los elementos")) && (normalized.contains(QStringLiteral("vector")) || normalized.contains(QStringLiteral("lista")) || normalized.contains(QStringLiteral("arreglo"))))) {
             isPrintCollectionInstruction = true;

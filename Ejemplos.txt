@@ -1,0 +1,35 @@
+Ejemplo 1
+sumar 5 y 3
+restar 10 y 4
+multiplicar 6 y 7
+dividir 20 entre 5
+
+Ejemplo 2
+repetir 5 veces mostrar el mensaje "Hola mundo"
+mientras el número sea menor que 100 sumar 10 al número
+
+
+Ejemplo 3
+sumar los números 10, 20 y 30 y mostrar el resultado
+crear una lista de 5 números enteros
+si el número es mayor que 50 mostrar el mensaje "Mayor que 50"
+repetir 3 veces imprimir "Iteración completada"
+
+
+Ejemplo 4
+comenzar programa
+crear lista de números enteros con 5 elementos
+asignar valor 10 al primer elemento de la lista
+asignar valor 20 al segundo elemento de la lista
+asignar valor 30 al tercer elemento de la lista
+asignar valor 40 al cuarto elemento de la lista
+asignar valor 50 al quinto elemento de la lista
+crear variable numero decimal total con valor inicial 0
+recorrer la lista y sumar cada elemento al total
+crear variable numero decimal resultado
+asignar valor total dividido entre 5 a resultado
+si resultado mayor que 30 mostrar "El promedio es mayor a 30"
+sino mostrar "El promedio es 30 o menor"
+terminar programa
+
+
