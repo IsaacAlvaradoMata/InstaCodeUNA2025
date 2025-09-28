@@ -1,0 +1,8 @@
+Comenzar programa
+Crear lista de número decimal con 5 elementos
+Ingresar valor de cada nota en la lista
+Crear variable número decimal total con valor inicial 0
+Recorrer la lista y sumar cada elemento en total
+Calcular promedio como total dividir 5 y asignar a resultado
+Mostrar "El promedio es: " y resultado
+Terminar programa

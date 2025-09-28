@@ -1,0 +1,13 @@
+Comenzar programa
+Definir función número entero factorial con parámetro número entero n
+    Crear variable número entero resultado con valor inicial 1
+    Mientras n mayor que 1
+        resultado multiplicar por n
+        n restar 1
+    Retornar resultado
+Crear variable número entero x
+Ingresar valor x
+Crear variable número entero r
+Asignar valor a r con llamar función factorial(x)
+Mostrar "El factorial es: " y r
+Terminar programa

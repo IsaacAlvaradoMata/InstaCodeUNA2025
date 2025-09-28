@@ -1,0 +1,6 @@
+Comenzar programa
+Crear estructura Estudiante con nombre (cadena de texto), edad (entero) y nota (decimal)
+Crear lista de Estudiante con 3 elementos
+Ingresar los datos de cada estudiante
+Recorrer la lista y mostrar nombre y nota
+Terminar programa

@@ -26,28 +26,80 @@ QPushButton {
     font-size: 14px;
     border: 1px solid #555;
     border-radius: 4px;
-    color: black; /* Texto claro */
+    color: #ffffff; /* Texto por defecto en tema oscuro */
 }
 
-#loadButton { background-color: #3498db; }
-#loadButton:hover { background-color: #5dade2; }
-#loadButton:pressed { background-color: #2e86c1; }
+/* Botones: tonos más oscuros para tema oscuro */
 
-#convertButton { background-color: #2ecc71; }
-#convertButton:hover { background-color: #58d68d; }
-#convertButton:pressed { background-color: #28b463; }
+/* --- Botón Cargar (azul más oscuro) --- */
+#loadButton {
+    background-color: #2b6ea3; /* base azul oscuro */
+    color: #ffffff;
+}
+#loadButton:hover {
+    background-color: #245f8a;
+}
+#loadButton:pressed {
+    background-color: #1f4f6f;
+    padding-top: 9px;
+    padding-bottom: 7px;
+}
 
-#exportButton { background-color: #e67e22; }
-#exportButton:hover { background-color: #eb984e; }
-#exportButton:pressed { background-color: #d35400; }
+/* --- Botón Convertir (verde más oscuro) --- */
+#convertButton {
+    background-color: #229955; /* base verde oscuro */
+    color: #ffffff;
+}
+#convertButton:hover {
+    background-color: #1e8749;
+}
+#convertButton:pressed {
+    background-color: #186b3a;
+    padding-top: 9px;
+    padding-bottom: 7px;
+}
 
-#themeButton { background-color: #8e44ad; }
-#themeButton:hover { background-color: #9b59b6; }
-#themeButton:pressed { background-color: #8034a1 }
+/* --- Botón Exportar (naranja más oscuro) --- */
+#exportButton {
+    background-color: #b36118; /* base naranja oscuro */
+    color: #ffffff;
+}
+#exportButton:hover {
+    background-color: #9a570f;
+}
+#exportButton:pressed {
+    background-color: #7a430c;
+    padding-top: 9px;
+    padding-bottom: 7px;
+}
 
-
-/* Botón de Tema (para que no tenga fondo) */
+/* --- Botón Cambiar Tema (morado más oscuro) --- */
 #themeButton {
-    background-color: transparent;
-    border: none;
+    background-color: #6f2d86; /* base morado oscuro */
+    color: #ffffff;
 }
+#themeButton:hover {
+    background-color: #5f2473;
+}
+#themeButton:pressed {
+    background-color: #4e1b59;
+    padding-top: 9px;
+    padding-bottom: 7px;
+}
+
+/* --- Botón Insertar Datos --- */
+#dataButton {
+    background-color: #86832dff; /* base morado oscuro */
+    color: #ffffff;
+}
+#dataButton:hover {
+    background-color: #737024ff;
+}
+#dataButton:pressed {
+    background-color: #57591bff;
+    padding-top: 9px;
+    padding-bottom: 7px;
+}
+
+
+

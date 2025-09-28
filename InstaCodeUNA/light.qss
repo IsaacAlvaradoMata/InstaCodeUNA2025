@@ -59,6 +59,20 @@ QPushButton {
     padding-bottom: 7px;
 }
 
+/* --- Botón Insertar Datos --- */
+#dataButton {
+    background-color: #a8ad44ff; /* Morado */
+}
+#dataButton:hover {
+    background-color: #b1b659ff;
+}
+#dataButton:pressed {
+    background-color: #9da134ff;
+    padding-top: 9px;
+    padding-bottom: 7px;
+}
+
+
 /* ... tus otros estilos ... */
 
 /* Estilo para la ventana principal con fondo degradado */

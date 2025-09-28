@@ -1,0 +1,8 @@
+Comenzar programa
+Crear variable número entero edad
+Ingresar valor edad
+Si edad mayor que 18
+    Mostrar "Es mayor de edad"
+Sino
+    Mostrar "Es menor de edad"
+Terminar programa

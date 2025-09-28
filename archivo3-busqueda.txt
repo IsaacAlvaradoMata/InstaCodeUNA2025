@@ -1,0 +1,13 @@
+Comenzar programa
+Crear lista de número entero con 10 elementos
+Ingresar los valores de la lista
+Crear variable número entero buscado
+Ingresar valor buscado
+Crear variable booleano encontrado con valor inicial falso
+Recorrer la lista
+    Si lista[i] igual a buscado
+        Mostrar "Número encontrado en la posición " y i
+        Asignar verdadero a encontrado
+Si encontrado igual a falso
+    Mostrar "Número no encontrado"
+Terminar programa
