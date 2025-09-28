@@ -1,0 +1,41 @@
+Comenzar programa
+Crear variable texto nombre con valor inicial "Sistema Académico"
+Crear lista de texto para guardar materias
+Crear lista de números decimales para guardar calificaciones
+Leer los datos desde archivo llamado materias_notas.txt
+Mostrar "Bienvenido al " y nombre
+Crear variable número decimal total con valor inicial 0
+Recorrer la lista y sumar cada elemento en total
+Calcular promedio como total dividido entre 5 y asignar a resultado
+Mostrar "El promedio general es: " y resultado
+Si resultado mayor que 90
+    Mostrar "Excelente rendimiento"
+Sino si resultado mayor que 80
+    Mostrar "Buen rendimiento"
+Sino
+    Mostrar "Rendimiento regular"
+Crear lista de números enteros con 3 elementos
+Asignar valor 95 al primer elemento de la lista
+Asignar valor 87 al segundo elemento de la lista
+Asignar valor 92 al tercer elemento de la lista
+Imprimir todos los elementos de la lista
+Crear variable número entero contador con valor inicial 1
+Mientras contador menor que 4
+    Mostrar "Procesando semestre " y contador
+    Asignar valor contador + 1 a contador
+Repetir 2 veces mostrar "¡Proceso completado!"
+Terminar programa
+
+
+Descripcion:
+El Ejemplo_Demostracion.txt simula un Sistema de Gestión Académica 
+que procesa calificaciones de materias y genera reportes de rendimiento estudiantil.
+
+Flujo del programa:
+Inicialización: Crea un sistema llamado "Sistema Académico"
+Carga de datos: Lee materias y calificaciones desde un archivo externo (materias_notas.txt)
+Procesamiento: Calcula el promedio general de las calificaciones
+Evaluación: Determina el nivel de rendimiento basado en el promedio
+Gestión de listas: Crea y manipula una lista de calificaciones adicionales
+Simulación de procesos: Ejecuta un ciclo de procesamiento por semestres
+Finalización: Confirma la completitud del proceso

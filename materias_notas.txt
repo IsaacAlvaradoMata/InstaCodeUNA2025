@@ -1,0 +1,5 @@
+Matemáticas,95.5
+Física,87.2
+Química,92.0
+Historia,88.5
+Literatura,91.3

@@ -212,12 +212,6 @@ public:
         closeAutoBlocks(0);
         closeAllBlocks();
 
-        if (!m_dataWritten && !m_input.dataFileContents.trimmed().isEmpty() && m_requiresDataFile) {
-            // Data requested but not written (e.g. no lectura line matched)
-            m_success = false;
-            m_issues.append(QStringLiteral("Se cargó un archivo de datos pero ninguna instrucción lo utilizó."));
-        }
-
         QStringList output;
         QStringList includeList = m_includes.values();
         std::sort(includeList.begin(), includeList.end());
@@ -332,8 +326,6 @@ private:
         if (handlePrintCollection(original, core)) return true;
         if (handleShowMessage(original, core)) return true;
         if (handleReadDataFile(original, core)) return true;
-        if (handleRequiresDataFile(original, core)) return true;
-        if (handleStoreNumbers(original, core)) return true;
         if (core.startsWith(QStringLiteral("guardar los numeros en"))) {
             return true; // Instrución orgánica sin código explícito
         }
@@ -448,6 +440,7 @@ private:
 
     void registerCollection(const QString &name, const CollectionInfo &info) {
         m_collections.insert(name, info);
+        m_collectionOrder.append(name);  // Maintain creation order
         m_lastCollection = name;
     }
 
@@ -1019,53 +1012,14 @@ private:
     bool handleCalculateAverage(const QString &original, const QString &normalized) {
         Q_UNUSED(original);
         
-        // Pattern: "mostrar el promedio es total" or similar patterns with division
-        if ((normalized.contains(QStringLiteral("promedio")) && normalized.contains(QStringLiteral("mostrar"))) ||
-            (normalized.contains(QStringLiteral("promedio")) && normalized.contains(QStringLiteral("imprimir")))) {
+        // Only handle explicit average calculation patterns, not display patterns
+        if ((normalized.contains(QStringLiteral("calcular promedio")) || 
+             normalized.contains(QStringLiteral("calcular el promedio"))) &&
+            normalized.contains(QStringLiteral("como")) && 
+            normalized.contains(QStringLiteral("dividir"))) {
             
-            // Extract the variable that contains the sum
-            QString message = readQuotedText(original);
-            QString appendedVar;
-
-            int firstQuote = original.indexOf('"');
-            int secondQuote = (firstQuote >= 0) ? original.indexOf('"', firstQuote + 1) : -1;
-            if (secondQuote >= 0) {
-                QString tail = original.mid(secondQuote + 1).trimmed();
-                if (tail.startsWith(QStringLiteral("y "))) {
-                    appendedVar = tail.mid(2).trimmed();
-                    appendedVar = sanitizedIdentifier(appendedVar);
-                }
-            }
-            
-            if (!appendedVar.isEmpty() && hasVariable(appendedVar)) {
-                // Find the collection that was used to calculate the sum
-                QString targetCollection = lastCollection();
-                if (!targetCollection.isEmpty()) {
-                    int collectionSize = m_collections.value(targetCollection).size;
-                    if (collectionSize > 0) {
-                        // Create promedio variable and calculate it
-                        QString promedioVar = QStringLiteral("promedio");
-                        if (hasVariable(promedioVar)) {
-                            promedioVar = QStringLiteral("promedio%1").arg(m_tempCounter++);
-                        }
-                        
-                        QString varType = variableType(appendedVar);
-                        if (varType.isEmpty()) varType = QStringLiteral("double");
-                        
-                        addCodeLine(QStringLiteral("%1 %2 = %3 / %4.0;").arg(varType, promedioVar, appendedVar).arg(collectionSize));
-                        
-                        QStringList parts;
-                        if (!message.isEmpty()) {
-                            parts << quoted(message);
-                        }
-                        parts << promedioVar;
-
-                        ensureInclude("iostream");
-                        addCodeLine(QStringLiteral("std::cout << %1 << std::endl;").arg(parts.join(QStringLiteral(" << "))));
-                        return true;
-                    }
-                }
-            }
+            // This is handled by handleCalculateExpression instead
+            return false;
         }
         
         return false;
@@ -1506,13 +1460,12 @@ private:
                 cppOp = QStringLiteral("==");
             }
             
-            QString line = QStringLiteral("    while (%1 %2 %3) {").arg(varName, cppOp, value);
+            QString line = QStringLiteral("while (%1 %2 %3) {").arg(varName, cppOp, value);
             
             if (m_insideFunction && !m_currentFunctionName.isEmpty()) {
                 m_functions[m_currentFunctionName].body.append(line);
             } else {
-                addCodeLine(QStringLiteral("while (%1 %2 %3) {").arg(varName, cppOp, value));
-                ++m_indentLevel;
+                startBlock(QStringLiteral("while (%1 %2 %3) {").arg(varName, cppOp, value), BlockType::Loop, true, m_currentIndent);
             }
             return true;
         }
@@ -1538,11 +1491,8 @@ private:
 
         ensureVariable(variable, variableType, defaultValue);
 
-        addCodeLine(QStringLiteral("while (%1 < %2) {").arg(variable, limit));
-        ++m_indentLevel;
+        startBlock(QStringLiteral("while (%1 < %2) {").arg(variable, limit), BlockType::Loop, false, m_currentIndent);
         addCodeLine(QStringLiteral("%1 += %2;").arg(variable, increment));
-        --m_indentLevel;
-        addCodeLine(QStringLiteral("}"));
         return true;
     }
 
@@ -1565,7 +1515,7 @@ private:
                 aliasToken = QStringLiteral("lista");
             }
 
-            QString baseName = getCollectionVariableName(elementPhrase, aliasToken, normalized);
+            QString baseName = aliasToken;
             QString variableName = uniqueName(baseName);
             QString type = QStringLiteral("std::vector<%1>").arg(elementType);
             ensureInclude("vector");
@@ -1590,7 +1540,7 @@ private:
                 aliasToken = QStringLiteral("lista");
             }
 
-            QString baseName = getCollectionVariableName(elementPhrase, aliasToken, normalized);
+            QString baseName = aliasToken;
             QString variableName = uniqueName(baseName);
             QString type = QStringLiteral("std::vector<%1>").arg(elementType);
             ensureInclude("vector");
@@ -1753,17 +1703,6 @@ private:
 
     QString getDefaultValueForType(const QString &type) {
         return (type == QStringLiteral("double")) ? QStringLiteral("0.0") : QStringLiteral("0");
-    }
-
-    QString getCollectionVariableName(const QString &elementPhrase, const QString &collectionType, const QString &normalized) {
-        // Generate more descriptive variable names based on context
-        if (elementPhrase.contains(QStringLiteral("decimal")) && normalized.contains(QStringLiteral("nota"))) {
-            return QStringLiteral("notas");
-        } else if (collectionType == QStringLiteral("vector")) {
-            return QStringLiteral("vector");
-        } else {
-            return QStringLiteral("lista");
-        }
     }
 
     QString uniqueName(const QString &base) {
@@ -2686,12 +2625,11 @@ private:
     
     QStringList getLastNCollections(int n) {
         QStringList collections;
-        QList<QString> keys = m_collections.keys();
         
-        // Get the last N collections in creation order
-        int start = qMax(0, keys.size() - n);
-        for (int i = start; i < keys.size(); i++) {
-            collections.append(keys[i]);
+        // Get the last N collections in creation order using m_collectionOrder
+        int start = qMax(0, m_collectionOrder.size() - n);
+        for (int i = start; i < m_collectionOrder.size(); i++) {
+            collections.append(m_collectionOrder[i]);
         }
         
         return collections;
@@ -2701,73 +2639,6 @@ private:
         bool ok;
         text.toDouble(&ok);
         return ok;
-    }
-
-    bool handleRequiresDataFile(const QString &original, const QString &normalized) {
-        Q_UNUSED(original);
-        
-        // Additional patterns that might require data files
-        bool requiresData = false;
-        
-        if ((normalized.contains(QStringLiteral("procesar")) && normalized.contains(QStringLiteral("archivo"))) ||
-            (normalized.contains(QStringLiteral("abrir")) && normalized.contains(QStringLiteral("archivo"))) ||
-            (normalized.contains(QStringLiteral("usar")) && normalized.contains(QStringLiteral("archivo"))) ||
-            (normalized.contains(QStringLiteral("acceder")) && normalized.contains(QStringLiteral("archivo"))) ||
-            (normalized.contains(QStringLiteral("obtener")) && normalized.contains(QStringLiteral("datos"))) ||
-            (normalized.contains(QStringLiteral("extraer")) && normalized.contains(QStringLiteral("datos")))) {
-            requiresData = true;
-        }
-        
-        if (!requiresData) {
-            return false;
-        }
-        
-        // Check if data file is loaded
-        if (m_input.dataFileContents.trimmed().isEmpty()) {
-            notifyIssue(QStringLiteral("Error: Esta instrucción requiere datos de archivo. Use el botón 'Cargar Datos' para cargar un archivo .txt antes de proceder."));
-            m_success = false;
-            return true;
-        }
-        
-        // If data is available, let other handlers process the instruction
-        return false;
-    }
-
-    bool handleStoreNumbers(const QString &original, const QString &normalized) {
-        Q_UNUSED(original);
-        
-        // Pattern: "guardar los números en el vector/lista/arreglo"
-        if (normalized.startsWith(QStringLiteral("guardar los numeros en")) ||
-            (normalized.contains(QStringLiteral("guardar")) && normalized.contains(QStringLiteral("numeros")) && 
-            (normalized.contains(QStringLiteral("vector")) || normalized.contains(QStringLiteral("lista")) || normalized.contains(QStringLiteral("arreglo"))))) {
-            
-            // This is an organic instruction that doesn't need explicit code generation
-            // The numbers are typically already being stored through input operations
-            return true;
-        }
-        
-        return false;
-    }
-
-    void ensureDataFileWritten(const QString &fileName, const QString &contents) {
-        if (m_dataWritten) {
-            return;
-        }
-        ensureInclude("fstream");
-        addStartupLine(QStringLiteral("{"), 1);
-        addStartupLine(QStringLiteral("std::ofstream datos(%1);").arg(quoted(fileName)), 2);
-        QStringList lines = contents.split('\n');
-        for (const QString &line : lines) {
-            QString trimmed = line;
-            if (trimmed.endsWith('\r')) {
-                trimmed.chop(1);
-            }
-            QString literal = quoted(trimmed);
-            addStartupLine(QStringLiteral("datos << %1 << '\\n';").arg(literal), 2);
-        }
-        addStartupLine(QStringLiteral("datos.close();"), 2);
-        addStartupLine(QStringLiteral("}"), 1);
-        m_dataWritten = true;
     }
 
     bool handlePrintPairs(const QString &original, const QString &normalized) {
@@ -3096,6 +2967,7 @@ private:
     QVector<BlockState> m_blocks;
     QMap<QString, VariableInfo> m_variables;
     QMap<QString, CollectionInfo> m_collections;
+    QStringList m_collectionOrder;  // Maintains creation order
     QMap<QString, FunctionInfo> m_functions;
     QMap<QString, StructInfo> m_structs;
     QString m_lastCollection;
@@ -3105,8 +2977,6 @@ private:
     int m_currentIndent = 0;
     int m_tempCounter = 1;
     QString m_dataFileName;
-    bool m_dataWritten = false;
-    bool m_requiresDataFile = false;
     bool m_insideFunction = false;
     QString m_currentFunctionName;
 };

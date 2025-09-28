@@ -1,4 +1,5 @@
-Enero,18.5
-Febrero,20.2
-Marzo,22.8
-Abril,25.1
+Costa Rica,San José
+México,Ciudad de México
+España,Madrid
+Francia,París
+Alemania,Berlín
