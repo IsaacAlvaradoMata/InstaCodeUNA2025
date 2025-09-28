@@ -2447,9 +2447,10 @@ private:
         if (m_input.dataFileContents.trimmed().isEmpty()) {
             notifyIssue(QStringLiteral("Error: No se ha cargado ningún archivo de datos. Use el botón 'Cargar Datos' para cargar un archivo .txt antes de usar instrucciones de lectura de datos."));
             m_success = false;
-            return true; // Return true to indicate we handled the instruction
+            return true;
         }
 
+        // Extract filename from instruction if specified
         QRegularExpression re("archivo llamado ([^\\s]+)");
         QRegularExpressionMatch match = re.match(normalized);
         QString fileName = match.hasMatch() ? match.captured(1).trimmed() : m_dataFileName;
@@ -2457,67 +2458,149 @@ private:
             fileName = m_dataFileName;
         }
 
-        // Data is already loaded, no need to write file
-        // ensureDataFileWritten(fileName, m_input.dataFileContents);
-
-        QString paises = collectionNameForAlias(QStringLiteral("paises"));
-        QString capitales = collectionNameForAlias(QStringLiteral("capitales"));
-        if (paises.isEmpty() || capitales.isEmpty()) {
-            // fallback to last two vectors
-            QStringList keys = m_collections.keys();
-            if (keys.size() >= 2) {
-                paises = keys.at(keys.size() - 2);
-                capitales = keys.at(keys.size() - 1);
-            }
-        }
-
-        if (paises.isEmpty() || capitales.isEmpty()) {
-            notifyIssue(QStringLiteral("Error: No se encontraron las listas de países y capitales. Asegúrese de crear las listas antes de leer los datos."));
+        // Process the loaded data directly
+        QStringList lines = m_input.dataFileContents.split(QRegularExpression("[\\r\\n]+"), Qt::SkipEmptyParts);
+        if (lines.isEmpty()) {
+            notifyIssue(QStringLiteral("Error: El archivo de datos está vacío."));
             return false;
         }
 
-        // Process the loaded data directly
-        QStringList lines = m_input.dataFileContents.split(QRegularExpression("[\\r\\n]+"), Qt::SkipEmptyParts);
+        // Analyze first line to determine format
+        QString firstLine = lines.first().trimmed();
+        QStringList sampleParts = firstLine.split(',');
+        int columnCount = sampleParts.size();
+        
+        // Handle single column data (just numbers or text)
+        if (columnCount == 1) {
+            return handleSingleColumnData(lines);
+        }
+        
+        // Handle multi-column data
+        return handleMultiColumnData(lines, columnCount);
+    }
+
+    bool handleSingleColumnData(const QStringList &lines) {
+        // For single column, use the last created collection
+        QString targetCollection = lastCollection();
+        if (targetCollection.isEmpty()) {
+            notifyIssue(QStringLiteral("Error: No se encontró ninguna lista para cargar los datos. Cree una lista antes de leer los datos."));
+            return false;
+        }
+        
+        CollectionInfo collInfo = m_collections.value(targetCollection);
         
         ensureInclude("vector");
-        ensureInclude("string");
+        if (collInfo.elementType == QStringLiteral("std::string")) {
+            ensureInclude("string");
+        }
         ensureInclude("iostream");
         
-        addCodeLine(QStringLiteral("// Cargar datos desde archivo cargado"));
+        addCodeLine(QStringLiteral("// Cargar datos desde archivo (una columna)"));
         
         for (const QString &line : lines) {
             QString trimmedLine = line.trimmed();
             if (trimmedLine.isEmpty()) continue;
             
-            QStringList parts = trimmedLine.split(',');
-            if (parts.size() >= 2) {
-                QString pais = parts[0].trimmed();
-                QString capital = parts[1].trimmed();
-                
-                // Add the country and capital to their respective vectors
-                addCodeLine(QStringLiteral("%1.push_back(%2);").arg(paises, quoted(pais)));
-                addCodeLine(QStringLiteral("%1.push_back(%2);").arg(capitales, quoted(capital)));
+            // Determine if it's a number or text based on collection type and content
+            if (collInfo.elementType == QStringLiteral("std::string") || 
+                !isValidNumber(trimmedLine)) {
+                addCodeLine(QStringLiteral("%1.push_back(%2);").arg(targetCollection, quoted(trimmedLine)));
+            } else {
+                // It's a number - ensure proper formatting
+                QString numberValue = ensureNumberString(trimmedLine, 
+                    collInfo.elementType == QStringLiteral("double") || trimmedLine.contains('.') || trimmedLine.contains(','));
+                addCodeLine(QStringLiteral("%1.push_back(%2);").arg(targetCollection, numberValue));
             }
         }
         
-        // Update collection info with actual data count
-        int dataCount = 0;
-        for (const QString &line : lines) {
-            if (!line.trimmed().isEmpty() && line.contains(',')) {
-                dataCount++;
-            }
+        // Update collection size
+        auto collIt = m_collections.find(targetCollection);
+        if (collIt != m_collections.end()) {
+            collIt.value().size = lines.size();
         }
         
-        // Update the collections with the actual size
-        auto paisesIt = m_collections.find(paises);
-        if (paisesIt != m_collections.end()) {
-            paisesIt.value().size = dataCount;
-        }
-        auto capitalesIt = m_collections.find(capitales);
-        if (capitalesIt != m_collections.end()) {
-            capitalesIt.value().size = dataCount;
-        }
         return true;
+    }
+    
+    bool handleMultiColumnData(const QStringList &lines, int columnCount) {
+        // Get the last N collections created (where N = columnCount)
+        QStringList recentCollections = getLastNCollections(columnCount);
+        
+        if (recentCollections.size() < columnCount) {
+            notifyIssue(QStringLiteral("Error: Se necesitan %1 listas para los datos de %1 columnas, pero solo se encontraron %2. Cree más listas antes de leer los datos.")
+                       .arg(columnCount).arg(recentCollections.size()));
+            return false;
+        }
+        
+        ensureInclude("vector");
+        ensureInclude("string");
+        ensureInclude("iostream");
+        
+        addCodeLine(QStringLiteral("// Cargar datos desde archivo (%1 columnas)").arg(columnCount));
+        
+        int processedLines = 0;
+        for (const QString &line : lines) {
+            QString trimmedLine = line.trimmed();
+            if (trimmedLine.isEmpty()) continue;
+            
+            QStringList parts = trimmedLine.split(',');
+            if (parts.size() < columnCount) {
+                // Skip incomplete lines but don't fail
+                continue;
+            }
+            
+            for (int i = 0; i < columnCount && i < recentCollections.size(); i++) {
+                QString collectionName = recentCollections[i];
+                QString value = parts[i].trimmed();
+                
+                // Remove quotes if present
+                if (value.startsWith('"') && value.endsWith('"')) {
+                    value = value.mid(1, value.length() - 2);
+                }
+                
+                CollectionInfo collInfo = m_collections.value(collectionName);
+                
+                // Determine how to add the value based on collection type and value format
+                if (collInfo.elementType == QStringLiteral("std::string") || !isValidNumber(value)) {
+                    addCodeLine(QStringLiteral("%1.push_back(%2);").arg(collectionName, quoted(value)));
+                } else {
+                    // It's a number - format according to collection type
+                    QString numberValue = ensureNumberString(value, 
+                        collInfo.elementType == QStringLiteral("double") || value.contains('.') || value.contains(','));
+                    addCodeLine(QStringLiteral("%1.push_back(%2);").arg(collectionName, numberValue));
+                }
+            }
+            processedLines++;
+        }
+        
+        // Update collection sizes
+        for (const QString &collectionName : recentCollections) {
+            auto collIt = m_collections.find(collectionName);
+            if (collIt != m_collections.end()) {
+                collIt.value().size = processedLines;
+            }
+        }
+        
+        return true;
+    }
+    
+    QStringList getLastNCollections(int n) {
+        QStringList collections;
+        QList<QString> keys = m_collections.keys();
+        
+        // Get the last N collections in creation order
+        int start = qMax(0, keys.size() - n);
+        for (int i = start; i < keys.size(); i++) {
+            collections.append(keys[i]);
+        }
+        
+        return collections;
+    }
+    
+    bool isValidNumber(const QString &text) {
+        bool ok;
+        text.toDouble(&ok);
+        return ok;
     }
 
     bool handleRequiresDataFile(const QString &original, const QString &normalized) {
