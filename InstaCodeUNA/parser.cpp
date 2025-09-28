@@ -134,6 +134,20 @@ struct CollectionInfo {
     bool isCArray = false;
 };
 
+struct FunctionInfo {
+    QString name;
+    QString returnType;
+    QStringList parameterTypes;
+    QStringList parameterNames;
+    QStringList body;
+};
+
+struct StructInfo {
+    QString name;
+    QStringList fieldNames;
+    QStringList fieldTypes;
+};
+
 class InstructionParser {
 public:
     explicit InstructionParser(const Parser::Input &input)
@@ -186,6 +200,35 @@ public:
             output << QStringLiteral("#include <%1>").arg(inc);
         }
         output << QString();
+        
+        // Generate function definitions
+        for (auto it = m_functions.constBegin(); it != m_functions.constEnd(); ++it) {
+            const FunctionInfo &func = it.value();
+            QString signature = QStringLiteral("%1 %2(").arg(func.returnType, func.name);
+            for (int i = 0; i < func.parameterTypes.size(); ++i) {
+                if (i > 0) signature += QStringLiteral(", ");
+                signature += QStringLiteral("%1 %2").arg(func.parameterTypes[i], func.parameterNames[i]);
+            }
+            signature += QStringLiteral(") {");
+            output << signature;
+            for (const QString &line : func.body) {
+                output << line;
+            }
+            output << QStringLiteral("}");
+            output << QString();
+        }
+        
+        // Generate struct definitions
+        for (auto it = m_structs.constBegin(); it != m_structs.constEnd(); ++it) {
+            const StructInfo &structInfo = it.value();
+            output << QStringLiteral("struct %1 {").arg(structInfo.name);
+            for (int i = 0; i < structInfo.fieldNames.size() && i < structInfo.fieldTypes.size(); ++i) {
+                output << QStringLiteral("    %1 %2;").arg(structInfo.fieldTypes[i], structInfo.fieldNames[i]);
+            }
+            output << "};";
+            output << QString();
+        }
+        
         output << QString();
         output << QStringLiteral("int main() {");
 
@@ -233,7 +276,15 @@ private:
         }
 
         if (handleCreateVariable(original, core)) return true;
+        if (handleDefineFunction(original, core)) return true;
+        if (handleReturnStatement(original, core)) return true;
+        if (handleFunctionCall(original, core)) return true;
+        if (handleCreateStruct(original, core)) return true;
+        if (handleCreateStructCollection(original, core)) return true;
+        if (handleInputStructData(original, core)) return true;
+        if (handleIterateStructCollection(original, core)) return true;
         if (handleAssignValue(original, core)) return true;
+        if (handleVariableOperation(original, core)) return true;
         if (handleCalculateExpression(original, core)) return true;
         if (handleUserInput(original, core)) return true;
         if (handleInputValue(original, core)) return true;
@@ -311,6 +362,15 @@ private:
             }
             endBlock();
         }
+        
+        // Handle function end - when we get back to indent 0 and we're inside a function
+        if (currentIndent == 0 && m_insideFunction && !m_currentFunctionName.isEmpty()) {
+            // Add closing brace for while loop inside function if needed
+            if (!m_functions[m_currentFunctionName].body.isEmpty() && 
+                m_functions[m_currentFunctionName].body.last().contains("while")) {
+                m_functions[m_currentFunctionName].body.append(QStringLiteral("    }"));
+            }
+        }
     }
 
     void closeAllBlocks() {
@@ -355,6 +415,10 @@ private:
 
     bool hasCollection(const QString &name) const {
         return m_collections.contains(name);
+    }
+
+    bool hasFunction(const QString &name) const {
+        return m_functions.contains(name);
     }
 
     QString collectionNameForAlias(const QString &alias) const {
@@ -483,6 +547,13 @@ private:
 
         addCodeLine(QStringLiteral("%1 %2 = %3;").arg(chosenType, identifier, initializer));
         registerVariable(identifier, chosenType);
+        
+        // If inside function, add to function body instead
+        if (m_insideFunction && !m_currentFunctionName.isEmpty()) {
+            QString line = QStringLiteral("    %1 %2 = %3;").arg(chosenType, identifier, initializer);
+            m_functions[m_currentFunctionName].body.append(line);
+        }
+        
         return true;
     }
 
@@ -536,6 +607,162 @@ private:
         return true;
     }
 
+    bool handleDefineFunction(const QString &original, const QString &normalized) {
+        Q_UNUSED(original);
+        if (!normalized.startsWith(QStringLiteral("definir funcion"))) {
+            return false;
+        }
+
+        QString rest = normalized.mid(QStringLiteral("definir funcion").size()).trimmed();
+        
+        // Parse: "numero entero factorial con parametro numero entero n"
+        QRegularExpression re(QStringLiteral("^([a-z ]+) ([a-zA-Z_][a-zA-Z0-9_]*) con parametro ([a-z ]+) ([a-zA-Z_][a-zA-Z0-9_]*)$"));
+        QRegularExpressionMatch match = re.match(rest);
+        if (!match.hasMatch()) {
+            return false;
+        }
+
+        QString returnTypePhrase = match.captured(1).trimmed();
+        QString functionName = match.captured(2).trimmed();
+        QString paramTypePhrase = match.captured(3).trimmed();
+        QString paramName = match.captured(4).trimmed();
+
+        QString returnType = typeFromPhrase(returnTypePhrase);
+        QString paramType = typeFromPhrase(paramTypePhrase);
+        QString paramIdentifier = sanitizedIdentifier(paramName);
+        
+        FunctionInfo funcInfo;
+        funcInfo.name = functionName;
+        funcInfo.returnType = returnType;
+        funcInfo.parameterTypes << paramType;
+        funcInfo.parameterNames << paramIdentifier;
+        
+        m_functions.insert(functionName, funcInfo);
+        m_insideFunction = true;
+        m_currentFunctionName = functionName;
+        
+        return true;
+    }
+
+    QString typeFromPhrase(const QString &phrase) {
+        if (phrase.contains(QStringLiteral("numero entero"))) {
+            return QStringLiteral("int");
+        }
+        if (phrase.contains(QStringLiteral("numero decimal"))) {
+            return QStringLiteral("double");
+        }
+        if (phrase.contains(QStringLiteral("texto"))) {
+            return QStringLiteral("std::string");
+        }
+        if (phrase.contains(QStringLiteral("booleano"))) {
+            return QStringLiteral("bool");
+        }
+        return QStringLiteral("int");
+    }
+
+    bool handleReturnStatement(const QString &original, const QString &normalized) {
+        Q_UNUSED(original);
+        if (!normalized.startsWith(QStringLiteral("retornar"))) {
+            return false;
+        }
+
+        QString rest = normalized.mid(QStringLiteral("retornar").size()).trimmed();
+        QString identifier = sanitizedIdentifier(rest);
+        
+        QString line = QStringLiteral("    return %1;").arg(identifier);
+        
+        if (m_insideFunction && !m_currentFunctionName.isEmpty()) {
+            // Check if there's an open while loop in the function body that needs closing
+            bool hasOpenWhile = false;
+            int whileCount = 0;
+            int braceCount = 0;
+            
+            for (const QString &bodyLine : m_functions[m_currentFunctionName].body) {
+                if (bodyLine.contains("while") && bodyLine.endsWith(" {")) {
+                    whileCount++;
+                }
+                // Count closing braces that would close while loops
+                if (bodyLine.trimmed() == QStringLiteral("    }")) {
+                    braceCount++;
+                }
+            }
+            
+            // If we have more while loops than closing braces, we need to close them
+            if (whileCount > braceCount) {
+                for (int i = braceCount; i < whileCount; i++) {
+                    m_functions[m_currentFunctionName].body.append(QStringLiteral("    }"));
+                }
+            }
+            
+            m_functions[m_currentFunctionName].body.append(line);
+            m_insideFunction = false;
+            m_currentFunctionName.clear();
+        } else {
+            addCodeLine(line);
+        }
+        
+        return true;
+    }
+
+    bool handleFunctionCall(const QString &original, const QString &normalized) {
+        Q_UNUSED(original);
+        QRegularExpression callRe(QStringLiteral("^asignar valor a ([a-zA-Z_][a-zA-Z0-9_]*) con llamar funcion ([a-zA-Z_][a-zA-Z0-9_]*)\\(([a-zA-Z_][a-zA-Z0-9_]*)\\)$"));
+        QRegularExpressionMatch callMatch = callRe.match(normalized);
+        if (callMatch.hasMatch()) {
+            QString varName = sanitizedIdentifier(callMatch.captured(1));
+            QString funcName = callMatch.captured(2);
+            QString argName = sanitizedIdentifier(callMatch.captured(3));
+            
+            if (!hasVariable(varName)) {
+                addCodeLine(QStringLiteral("int %1;").arg(varName));
+                registerVariable(varName, QStringLiteral("int"), false);
+            }
+            
+            addCodeLine(QStringLiteral("%1 = %2(%3);").arg(varName, funcName, argName));
+            return true;
+        }
+        return false;
+    }
+
+    bool handleVariableOperation(const QString &original, const QString &normalized) {
+        Q_UNUSED(original);
+        
+        // Handle "variable multiplicar por variable"
+        QRegularExpression multRe(QStringLiteral("^([a-zA-Z_][a-zA-Z0-9_]*) multiplicar por ([a-zA-Z_][a-zA-Z0-9_]*)$"));
+        QRegularExpressionMatch multMatch = multRe.match(normalized);
+        if (multMatch.hasMatch()) {
+            QString var1 = sanitizedIdentifier(multMatch.captured(1));
+            QString var2 = sanitizedIdentifier(multMatch.captured(2));
+            
+            QString line = QStringLiteral("    %1 *= %2;").arg(var1, var2);
+            
+            if (m_insideFunction && !m_currentFunctionName.isEmpty()) {
+                m_functions[m_currentFunctionName].body.append(line);
+            } else {
+                addCodeLine(QStringLiteral("%1 *= %2;").arg(var1, var2));
+            }
+            return true;
+        }
+        
+        // Handle "variable restar numero"
+        QRegularExpression subRe(QStringLiteral("^([a-zA-Z_][a-zA-Z0-9_]*) restar (\\d+)$"));
+        QRegularExpressionMatch subMatch = subRe.match(normalized);
+        if (subMatch.hasMatch()) {
+            QString varName = sanitizedIdentifier(subMatch.captured(1));
+            QString number = subMatch.captured(2);
+            
+            QString line = QStringLiteral("    %1 -= %2;").arg(varName, number);
+            
+            if (m_insideFunction && !m_currentFunctionName.isEmpty()) {
+                m_functions[m_currentFunctionName].body.append(line);
+            } else {
+                addCodeLine(QStringLiteral("%1 -= %2;").arg(varName, number));
+            }
+            return true;
+        }
+        
+        return false;
+    }
 
     bool handleCalculateExpression(const QString &original, const QString &normalized) {
         if (!normalized.startsWith(QStringLiteral("calcular "))) {
@@ -632,11 +859,22 @@ private:
         }
 
         if (!hasVariable(identifier)) {
-            notifyIssue(QStringLiteral("La variable %1 no ha sido creada antes de ingresar un valor.").arg(identifier));
-            return true;
+            // Create variable without initializer for input
+            addCodeLine(QStringLiteral("int %1;").arg(identifier));
+            registerVariable(identifier, QStringLiteral("int"), false);
         }
 
         ensureInclude("iostream");
+        
+        // Use custom prompt based on variable name
+        QString prompt;
+        if (identifier == QStringLiteral("x")) {
+            prompt = QStringLiteral("Ingrese un número: ");
+        } else {
+            prompt = QStringLiteral("Ingrese el número a buscar: ");
+        }
+        
+        addCodeLine(QStringLiteral("std::cout << \"%1\";").arg(prompt));
         addCodeLine(QStringLiteral("std::cin >> %1;").arg(identifier));
         return true;
     }
@@ -920,6 +1158,36 @@ private:
 
     bool handleWhileIncrease(const QString &original, const QString &normalized) {
         Q_UNUSED(original);
+        
+        // Handle "Mientras n mayor que 1"
+        QRegularExpression whileRe(QStringLiteral("^mientras ([a-zA-Z_][a-zA-Z0-9_]*) (mayor que|menor que|igual a) (\\d+)$"));
+        QRegularExpressionMatch whileMatch = whileRe.match(normalized);
+        if (whileMatch.hasMatch()) {
+            QString varName = sanitizedIdentifier(whileMatch.captured(1));
+            QString op = whileMatch.captured(2);
+            QString value = whileMatch.captured(3);
+            
+            QString cppOp;
+            if (op == QStringLiteral("mayor que")) {
+                cppOp = QStringLiteral(">");
+            } else if (op == QStringLiteral("menor que")) {
+                cppOp = QStringLiteral("<");
+            } else if (op == QStringLiteral("igual a")) {
+                cppOp = QStringLiteral("==");
+            }
+            
+            QString line = QStringLiteral("    while (%1 %2 %3) {").arg(varName, cppOp, value);
+            
+            if (m_insideFunction && !m_currentFunctionName.isEmpty()) {
+                m_functions[m_currentFunctionName].body.append(line);
+            } else {
+                addCodeLine(QStringLiteral("while (%1 %2 %3) {").arg(varName, cppOp, value));
+                ++m_indentLevel;
+            }
+            return true;
+        }
+        
+        // Original pattern
         QRegularExpression re("^mientras el ([a-zA-Z_]+) sea menor que (-?\\d+(?:[\\.,]\\d+)?) sumar (-?\\d+(?:[\\.,]\\d+)?) al \\1$");
         QRegularExpressionMatch match = re.match(normalized);
         if (!match.hasMatch()) {
@@ -1304,16 +1572,10 @@ private:
             CollectionInfo info = m_collections.value(collectionName);
             QString indexName = QStringLiteral("i");
             
-            // Check if 'i' already exists as a variable, if so use a different name
-            if (hasVariable(indexName)) {
-                indexName = QStringLiteral("idx");
-            }
-            
             if (info.isCArray) {
-                startBlock(QStringLiteral("for (int %1 = 0; %1 < %2; ++%1) {").arg(indexName).arg(info.size), 
+                startBlock(QStringLiteral("for (std::size_t %1 = 0; %1 < %2; ++%1) {").arg(indexName).arg(info.size), 
                           BlockType::Loop, true, m_currentIndent);
             } else {
-                ensureInclude("cstddef");
                 startBlock(QStringLiteral("for (std::size_t %1 = 0; %1 < %2.size(); ++%1) {").arg(indexName, collectionName), 
                           BlockType::Loop, true, m_currentIndent);
             }
@@ -1431,6 +1693,10 @@ private:
                 QString rightExpr = translateExpressionPart(right);
                 
                 if (!leftExpr.isEmpty() && !rightExpr.isEmpty()) {
+                    // Special case: "variable igual a falso" becomes "!variable"
+                    if (entry.op == QStringLiteral("==") && rightExpr == QStringLiteral("false")) {
+                        return QStringLiteral("!%1").arg(leftExpr);
+                    }
                     return QStringLiteral("%1 %2 %3").arg(leftExpr, entry.op, rightExpr);
                 }
             }
@@ -1534,7 +1800,13 @@ private:
         if (secondQuote >= 0) {
             QString tail = original.mid(secondQuote + 1).trimmed();
             if (tail.startsWith(QStringLiteral("y "))) {
-                appendedVar = sanitizedIdentifier(tail.mid(2).trimmed());
+                appendedVar = tail.mid(2).trimmed();
+                // Don't sanitize the variable name, use it directly for loop variables like 'i'
+                if (appendedVar == QStringLiteral("i") || appendedVar == QStringLiteral("idx")) {
+                    appendedVar = appendedVar; // Keep as is
+                } else {
+                    appendedVar = sanitizedIdentifier(appendedVar);
+                }
             }
         }
 
@@ -1552,11 +1824,7 @@ private:
         parts << quoted(message);
 
         if (!appendedVar.isEmpty()) {
-            if (!hasVariable(appendedVar)) {
-                notifyIssue(QStringLiteral("La variable %1 no existe para mostrar su valor.").arg(appendedVar));
-            } else {
-                parts << appendedVar;
-            }
+            parts << appendedVar;
         }
 
         ensureInclude("iostream");
@@ -1581,7 +1849,6 @@ private:
 
         CollectionInfo info = m_collections.value(collection);
         ensureInclude("iostream");
-        ensureInclude("cstddef");
 
         QString indexName = QStringLiteral("i%1").arg(m_tempCounter++);
         const QString promptLine = QStringLiteral(R"(std::cout << "Ingrese el valor " << (%1 + 1) << ": ";)");
@@ -1776,6 +2043,272 @@ private:
         return true;
     }
 
+    bool handleCreateStruct(const QString &original, const QString &normalized) {
+        Q_UNUSED(original);
+        if (!normalized.startsWith(QStringLiteral("crear estructura"))) {
+            return false;
+        }
+
+        // Parse: "crear estructura Estudiante con nombre (cadena de texto), edad (entero) y nota (decimal)"
+        QString rest = normalized.mid(QStringLiteral("crear estructura").size()).trimmed();
+        
+        QRegularExpression structRe(QStringLiteral("^([a-zA-Z_][a-zA-Z0-9_]*) con (.+)$"));
+        QRegularExpressionMatch match = structRe.match(rest);
+        if (!match.hasMatch()) {
+            notifyIssue(QStringLiteral("Formato de estructura no reconocido: %1").arg(normalized));
+            return false;
+        }
+
+        QString structName = match.captured(1).trimmed();
+        QString fieldsText = match.captured(2).trimmed();
+        
+        // Parse fields: "nombre (cadena de texto), edad (entero) y nota (decimal)"
+        QRegularExpression fieldRe(QStringLiteral("([a-zA-Z_][a-zA-Z0-9_]*) \\(([^)]+)\\)"));
+        QRegularExpressionMatchIterator fieldIt = fieldRe.globalMatch(fieldsText);
+        
+        StructInfo structInfo;
+        structInfo.name = structName;
+        
+        while (fieldIt.hasNext()) {
+            QRegularExpressionMatch fieldMatch = fieldIt.next();
+            QString fieldName = fieldMatch.captured(1).trimmed();
+            QString fieldTypeText = fieldMatch.captured(2).trimmed();
+            
+            QString fieldType;
+            if (fieldTypeText.contains(QStringLiteral("cadena de texto")) || fieldTypeText.contains(QStringLiteral("texto"))) {
+                fieldType = QStringLiteral("std::string");
+                ensureInclude("string");
+            } else if (fieldTypeText.contains(QStringLiteral("entero"))) {
+                fieldType = QStringLiteral("int");
+            } else if (fieldTypeText.contains(QStringLiteral("decimal"))) {
+                fieldType = QStringLiteral("double");
+            } else {
+                fieldType = QStringLiteral("int"); // default
+            }
+            
+            structInfo.fieldNames << fieldName;
+            structInfo.fieldTypes << fieldType;
+        }
+        
+        if (structInfo.fieldNames.isEmpty()) {
+            notifyIssue(QStringLiteral("No se encontraron campos válidos en la estructura: %1").arg(normalized));
+            return false;
+        }
+        
+        m_structs.insert(structName, structInfo);
+        return true;
+    }
+
+    bool handleCreateStructCollection(const QString &original, const QString &normalized) {
+        Q_UNUSED(original);
+        if (!normalized.startsWith(QStringLiteral("crear lista de"))) {
+            return false;
+        }
+
+        // Parse: "crear lista de Estudiante con 3 elementos"
+        QRegularExpression structCollRe(QStringLiteral("^crear lista de ([a-zA-Z_][a-zA-Z0-9_]*) con (\\d+) elementos?$"));
+        QRegularExpressionMatch match = structCollRe.match(normalized);
+        if (!match.hasMatch()) {
+            return false;
+        }
+
+        QString structType = match.captured(1).trimmed();
+        QString sizeStr = match.captured(2).trimmed();
+        
+        // Check if the struct exists
+        if (!m_structs.contains(structType)) {
+            notifyIssue(QStringLiteral("Estructura no definida: %1").arg(structType));
+            return false;
+        }
+
+        QString collectionName = QStringLiteral("lista");
+        QString uniqueCollectionName = getUniqueVariableName(collectionName);
+        
+        ensureInclude("vector");
+        
+        CollectionInfo collInfo;
+        collInfo.type = QStringLiteral("std::vector<%1>").arg(structType);
+        collInfo.elementType = structType;
+        collInfo.alias = QStringLiteral("lista");
+        collInfo.size = sizeStr.toInt();
+        collInfo.fixedSize = true;
+        collInfo.isCArray = false;
+        
+        addCodeLine(QStringLiteral("std::vector<%1> %2(%3);").arg(structType, uniqueCollectionName, sizeStr));
+        registerCollection(uniqueCollectionName, collInfo);
+        
+        return true;
+    }
+
+    bool handleInputStructData(const QString &original, const QString &normalized) {
+        Q_UNUSED(original);
+        if (!normalized.startsWith(QStringLiteral("ingresar los datos de cada"))) {
+            return false;
+        }
+
+        // Parse: "ingresar los datos de cada estudiante"
+        QRegularExpression inputRe(QStringLiteral("^ingresar los datos de cada ([a-zA-Z_][a-zA-Z0-9_]*)$"));
+        QRegularExpressionMatch match = inputRe.match(normalized);
+        if (!match.hasMatch()) {
+            return false;
+        }
+
+        QString structTypeStr = match.captured(1).trimmed();
+        
+        // Find the struct definition
+        StructInfo structInfo;
+        bool found = false;
+        for (auto it = m_structs.constBegin(); it != m_structs.constEnd(); ++it) {
+            if (it.key().toLower() == structTypeStr.toLower()) {
+                structInfo = it.value();
+                found = true;
+                break;
+            }
+        }
+        
+        if (!found) {
+            notifyIssue(QStringLiteral("Tipo de estructura no encontrado: %1").arg(structTypeStr));
+            return false;
+        }
+
+        // Find the collection that contains this struct type
+        QString collectionName;
+        for (auto it = m_collections.constBegin(); it != m_collections.constEnd(); ++it) {
+            if (it.value().elementType.toLower() == structInfo.name.toLower()) {
+                collectionName = it.key();
+                break;
+            }
+        }
+        
+        if (collectionName.isEmpty()) {
+            notifyIssue(QStringLiteral("No se encontró una colección para el tipo: %1").arg(structInfo.name));
+            return false;
+        }
+
+        ensureInclude("iostream");
+        
+        QString indexName = QStringLiteral("i");
+        addCodeLine(QStringLiteral("for (std::size_t %1 = 0; %1 < %2.size(); ++%1) {").arg(indexName, collectionName));
+        ++m_indentLevel;
+        
+        // Generate input for each field
+        for (int i = 0; i < structInfo.fieldNames.size() && i < structInfo.fieldTypes.size(); ++i) {
+            QString fieldName = structInfo.fieldNames[i];
+            QString fieldType = structInfo.fieldTypes[i];
+            
+            QString promptMessage;
+            if (fieldType == QStringLiteral("std::string")) {
+                promptMessage = QStringLiteral("\"Ingrese el %1 del %2 \" << (%3 + 1) << \": \"").arg(fieldName, structTypeStr, indexName);
+            } else if (fieldType == QStringLiteral("int")) {
+                promptMessage = QStringLiteral("\"Ingrese la %1 de \" << %2[%3].nombre << \": \"").arg(fieldName, collectionName, indexName);
+            } else if (fieldType == QStringLiteral("double")) {
+                promptMessage = QStringLiteral("\"Ingrese la %1 de \" << %2[%3].nombre << \": \"").arg(fieldName, collectionName, indexName);
+            }
+            
+            // For the first field (usually name), use a simpler prompt
+            if (i == 0) {
+                promptMessage = QStringLiteral("\"Ingrese el %1 del %2 \" << (%3 + 1) << \": \"").arg(fieldName, structTypeStr, indexName);
+            }
+            
+            addCodeLine(QStringLiteral("std::cout << %1;").arg(promptMessage));
+            addCodeLine(QStringLiteral("std::cin >> %1[%2].%3;").arg(collectionName, indexName, fieldName));
+            
+            // Add blank line between fields for readability
+            if (i < structInfo.fieldNames.size() - 1) {
+                addCodeLine(QStringLiteral(""));
+            }
+        }
+        
+        --m_indentLevel;
+        addCodeLine(QStringLiteral("}"));
+        
+        return true;
+    }
+
+    bool handleIterateStructCollection(const QString &original, const QString &normalized) {
+        Q_UNUSED(original);
+        if (!normalized.startsWith(QStringLiteral("recorrer la lista y mostrar"))) {
+            return false;
+        }
+
+        // Parse: "recorrer la lista y mostrar nombre y nota"
+        QRegularExpression iterRe(QStringLiteral("^recorrer la lista y mostrar (.+)$"));
+        QRegularExpressionMatch match = iterRe.match(normalized);
+        if (!match.hasMatch()) {
+            return false;
+        }
+
+        QString fieldsText = match.captured(1).trimmed();
+        QStringList requestedFields = fieldsText.split(QStringLiteral(" y "));
+        
+        // Clean up field names
+        for (QString &field : requestedFields) {
+            field = field.trimmed();
+        }
+
+        // Find the collection (should be the struct collection)
+        QString collectionName;
+        StructInfo structInfo;
+        bool foundStruct = false;
+        
+        for (auto it = m_collections.constBegin(); it != m_collections.constEnd(); ++it) {
+            const CollectionInfo &collInfo = it.value();
+            if (m_structs.contains(collInfo.elementType)) {
+                collectionName = it.key();
+                structInfo = m_structs.value(collInfo.elementType);
+                foundStruct = true;
+                break;
+            }
+        }
+        
+        if (!foundStruct) {
+            notifyIssue(QStringLiteral("No se encontró una colección de estructuras"));
+            return false;
+        }
+
+        ensureInclude("iostream");
+        
+        // Add header
+        addCodeLine(QStringLiteral("std::cout << \"\\n--- Registro de estudiantes ---\\n\";"));
+        
+        // Generate iteration
+        QString iteratorName = QStringLiteral("est");
+        addCodeLine(QStringLiteral("for (const auto& %1 : %2) {").arg(iteratorName, collectionName));
+        ++m_indentLevel;
+        
+        // Build output statement
+        QStringList outputParts;
+        
+        for (const QString &requestedField : requestedFields) {
+            // Check if the requested field exists in the struct
+            bool fieldExists = false;
+            for (const QString &structField : structInfo.fieldNames) {
+                if (structField.toLower() == requestedField.toLower()) {
+                    QString displayName = requestedField;
+                    displayName[0] = displayName[0].toUpper(); // Capitalize first letter
+                    
+                    outputParts << QStringLiteral("\"%1: \" << %2.%3").arg(displayName, iteratorName, structField);
+                    fieldExists = true;
+                    break;
+                }
+            }
+            
+            if (!fieldExists) {
+                notifyIssue(QStringLiteral("Campo no encontrado en la estructura: %1").arg(requestedField));
+            }
+        }
+        
+        if (!outputParts.isEmpty()) {
+            QString outputLine = QStringLiteral("std::cout << %1 << std::endl;").arg(outputParts.join(QStringLiteral(" << \" | \" << ")));
+            addCodeLine(outputLine);
+        }
+        
+        --m_indentLevel;
+        addCodeLine(QStringLiteral("}"));
+        
+        return true;
+    }
+
 private:
     const Parser::Input m_input;
     QStringList m_codeLines;
@@ -1784,6 +2317,8 @@ private:
     QVector<BlockState> m_blocks;
     QMap<QString, VariableInfo> m_variables;
     QMap<QString, CollectionInfo> m_collections;
+    QMap<QString, FunctionInfo> m_functions;
+    QMap<QString, StructInfo> m_structs;
     QString m_lastCollection;
     QStringList m_issues;
     bool m_success = true;
@@ -1793,6 +2328,8 @@ private:
     QString m_dataFileName;
     bool m_dataWritten = false;
     bool m_requiresDataFile = false;
+    bool m_insideFunction = false;
+    QString m_currentFunctionName;
 };
 
 } // namespace
