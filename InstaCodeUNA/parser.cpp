@@ -161,6 +161,30 @@ public:
 
     Parser::Output run() {
         const QStringList lines = splitLines(m_input.instructions);
+        
+        // Pre-scan for data file requirements
+        bool needsDataFile = false;
+        for (const QString &rawLine : lines) {
+            QString normalized = normalizeLine(rawLine);
+            if ((normalized.contains(QStringLiteral("leer")) && (normalized.contains(QStringLiteral("datos")) || normalized.contains(QStringLiteral("archivo")))) ||
+                (normalized.contains(QStringLiteral("cargar")) && (normalized.contains(QStringLiteral("datos")) || normalized.contains(QStringLiteral("archivo")))) ||
+                (normalized.contains(QStringLiteral("importar")) && (normalized.contains(QStringLiteral("datos")) || normalized.contains(QStringLiteral("archivo")))) ||
+                ((normalized.contains(QStringLiteral("imprimir")) || normalized.contains(QStringLiteral("mostrar"))) && 
+                 normalized.contains(QStringLiteral("paises")) && normalized.contains(QStringLiteral("capitales")))) {
+                needsDataFile = true;
+                break;
+            }
+        }
+        
+        // Early validation if data file is needed but not provided
+        if (needsDataFile && m_input.dataFileContents.trimmed().isEmpty()) {
+            Parser::Output result;
+            result.code = QString();
+            result.issues.append(QStringLiteral("Error: Las instrucciones requieren un archivo de datos, pero no se ha cargado ninguno. Use el botón 'Cargar Datos' para cargar un archivo .txt antes de convertir."));
+            result.success = false;
+            return result;
+        }
+        
         for (const QString &rawLine : lines) {
             QString trimmed = rawLine.trimmed();
             if (trimmed.isEmpty()) {
@@ -283,28 +307,31 @@ private:
         if (handleCreateStructCollection(original, core)) return true;
         if (handleInputStructData(original, core)) return true;
         if (handleIterateStructCollection(original, core)) return true;
+        if (handleCompoundArithmeticInstruction(original, core)) return true;
+        if (handleAssignCollectionElement(original, core)) return true;
         if (handleAssignValue(original, core)) return true;
         if (handleVariableOperation(original, core)) return true;
         if (handleCalculateExpression(original, core)) return true;
         if (handleUserInput(original, core)) return true;
+        if (handleRequestNumberInput(original, core)) return true;
         if (handleInputValue(original, core)) return true;
         if (handleArithmeticBinary(original, core)) return true;
         if (handleArithmeticAggregate(original, core)) return true;
         if (handleRepeatMessage(original, core)) return true;
         if (handleWhileIncrease(original, core)) return true;
         if (handleCreateCollection(original, core)) return true;
-        if (handleAssignCollectionElement(original, core)) return true;
         if (handleIterateCollectionSum(original, core)) return true;
         if (handleAddToCollection(original, core)) return true;
         if (handleRemoveFromCollection(original, core)) return true;
         if (handleSortCollection(original, core)) return true;
         if (handleIterateCollection(original, core)) return true;
         if (handleIfCondition(original, core)) return true;
-        if (handleShowMessage(original, core)) return true;
-        if (handleUserInput(original, core)) return true;
-        if (handlePrintCollection(original, core)) return true;
-        if (handleReadDataFile(original, core)) return true;
         if (handlePrintPairs(original, core)) return true;
+        if (handlePrintCollection(original, core)) return true;
+        if (handleShowMessage(original, core)) return true;
+        if (handleReadDataFile(original, core)) return true;
+        if (handleRequiresDataFile(original, core)) return true;
+        if (handleStoreNumbers(original, core)) return true;
         if (core.startsWith(QStringLiteral("guardar los numeros en"))) {
             return true; // Instrución orgánica sin código explícito
         }
@@ -395,7 +422,14 @@ private:
         if (hasVariable(name)) {
             return;
         }
-        addCodeLine(QStringLiteral("%1 %2 = %3;").arg(type, name, initializer));
+        
+        // If inside function, add to function body instead of main
+        if (m_insideFunction && !m_currentFunctionName.isEmpty()) {
+            QString line = QStringLiteral("    %1 %2 = %3;").arg(type, name, initializer);
+            m_functions[m_currentFunctionName].body.append(line);
+        } else {
+            addCodeLine(QStringLiteral("%1 %2 = %3;").arg(type, name, initializer));
+        }
         registerVariable(name, type, false);
     }
 
@@ -428,6 +462,23 @@ private:
                 return it.key();
             }
         }
+        
+        // Try exact match for known aliases
+        if (alias == QStringLiteral("paises") || alias == QStringLiteral("países")) {
+            for (auto it = m_collections.constBegin(); it != m_collections.constEnd(); ++it) {
+                if (it.value().alias == QStringLiteral("paises") || it.key().contains(QStringLiteral("paises"))) {
+                    return it.key();
+                }
+            }
+        }
+        if (alias == QStringLiteral("capitales")) {
+            for (auto it = m_collections.constBegin(); it != m_collections.constEnd(); ++it) {
+                if (it.value().alias == QStringLiteral("capitales") || it.key().contains(QStringLiteral("capitales"))) {
+                    return it.key();
+                }
+            }
+        }
+        
         return QString();
     }
 
@@ -545,14 +596,16 @@ private:
             }
         }
 
-        addCodeLine(QStringLiteral("%1 %2 = %3;").arg(chosenType, identifier, initializer));
-        registerVariable(identifier, chosenType);
-        
-        // If inside function, add to function body instead
+        // Add variable to the appropriate location
         if (m_insideFunction && !m_currentFunctionName.isEmpty()) {
+            // If inside function, add to function body instead
             QString line = QStringLiteral("    %1 %2 = %3;").arg(chosenType, identifier, initializer);
             m_functions[m_currentFunctionName].body.append(line);
+        } else {
+            // Otherwise add to main code
+            addCodeLine(QStringLiteral("%1 %2 = %3;").arg(chosenType, identifier, initializer));
         }
+        registerVariable(identifier, chosenType);
         
         return true;
     }
@@ -590,15 +643,21 @@ private:
 
         QString identifier = sanitizedIdentifier(namePart);
         if (!hasVariable(identifier)) {
-            // Try to determine type from value
-            QString varType = QStringLiteral("double");
+            // Determine type from value
+            QString varType = QStringLiteral("int");
+            QString initialValue = QStringLiteral("0");
+            
             if (valuePart == QStringLiteral("verdadero") || 
                 valuePart == QStringLiteral("falso") ||
                 valuePart == QStringLiteral("true") || 
                 valuePart == QStringLiteral("false")) {
                 varType = QStringLiteral("bool");
+                initialValue = QStringLiteral("false");
+            } else if (isDecimalNumber(valuePart)) {
+                varType = QStringLiteral("double");
+                initialValue = QStringLiteral("0.0");
             }
-            QString initialValue = (varType == QStringLiteral("bool")) ? QStringLiteral("false") : QStringLiteral("0.0");
+            
             ensureVariable(identifier, varType, initialValue);
         }
 
@@ -673,7 +732,6 @@ private:
         
         if (m_insideFunction && !m_currentFunctionName.isEmpty()) {
             // Check if there's an open while loop in the function body that needs closing
-            bool hasOpenWhile = false;
             int whileCount = 0;
             int braceCount = 0;
             
@@ -807,7 +865,21 @@ private:
         }
 
         if (!hasVariable(dest)) {
-            ensureVariable(dest, QStringLiteral("double"), QStringLiteral("0.0"));
+            // Try to determine the appropriate type based on the expression
+            QString varType = QStringLiteral("int");
+            QString defaultValue = QStringLiteral("0");
+            
+            // If the expression contains decimal numbers, decimal operations, or division, use double
+            if (expr.contains('.') || 
+                exprPart.contains(QStringLiteral("decimal")) ||
+                expr.contains('/') || 
+                exprPart.contains(QStringLiteral("dividir")) || 
+                exprPart.contains(QStringLiteral("dividido"))) {
+                varType = QStringLiteral("double");
+                defaultValue = QStringLiteral("0.0");
+            }
+            
+            ensureVariable(dest, varType, defaultValue);
         }
 
         addCodeLine(QStringLiteral("%1 = %2;").arg(dest, expr));
@@ -870,8 +942,10 @@ private:
         QString prompt;
         if (identifier == QStringLiteral("x")) {
             prompt = QStringLiteral("Ingrese un número: ");
+        } else if (identifier == QStringLiteral("edad")) {
+            prompt = QStringLiteral("Ingrese la edad: ");
         } else {
-            prompt = QStringLiteral("Ingrese el número a buscar: ");
+            prompt = QStringLiteral("Ingrese el %1: ").arg(identifier);
         }
         
         addCodeLine(QStringLiteral("std::cout << \"%1\";").arg(prompt));
@@ -880,6 +954,7 @@ private:
     }
 
     QString translateExpression(const QString &valuePart, const QString &original) {
+        Q_UNUSED(original);
         QString expr = valuePart;
         QString normalizedExpr = normalizeLine(expr);
 
@@ -937,8 +1012,10 @@ private:
         if (normalizedExpr.contains(QStringLiteral(" dividido entre "))) {
             QStringList parts = normalizedExpr.split(QStringLiteral(" dividido entre "));
             if (parts.size() == 2) {
-                QString left = translateExpression(parts[0].trimmed(), original);
-                QString right = ensureNumberString(parts[1], true);
+                QString left = sanitizedIdentifier(parts[0].trimmed());
+                QString rightPart = parts[1].trimmed();
+                bool isDecimal = isDecimalNumber(rightPart);
+                QString right = ensureNumberString(rightPart, isDecimal);
                 return QStringLiteral("%1 / %2").arg(left, right);
             }
         }
@@ -1116,6 +1193,53 @@ private:
         return true;
     }
 
+    bool handleCompoundArithmeticInstruction(const QString &original, const QString &normalized) {
+        Q_UNUSED(original);
+        // Handle "sumar los números X, Y y Z y mostrar el resultado"
+        if (normalized.startsWith(QStringLiteral("sumar los numeros")) && 
+            normalized.contains(QStringLiteral("y mostrar el resultado"))) {
+            
+            // Extract numbers part
+            QString numbersOnly = normalized;
+            int endIdx = numbersOnly.indexOf(QStringLiteral("y mostrar el resultado"));
+            if (endIdx > 0) {
+                numbersOnly = numbersOnly.left(endIdx).trimmed();
+            }
+            
+            QRegularExpression numberRegex(QStringLiteral(R"(-?\d+(?:[.,]\d+)?)"));
+            QRegularExpressionMatchIterator it = numberRegex.globalMatch(numbersOnly);
+            QVector<QString> numbers;
+            bool anyDecimal = false;
+            while (it.hasNext()) {
+                QRegularExpressionMatch match = it.next();
+                QString raw = match.captured();
+                bool hasDecimal = raw.contains('.') || raw.contains(',');
+                numbers.append(ensureNumberString(raw, hasDecimal));
+                anyDecimal = anyDecimal || hasDecimal;
+            }
+
+            if (numbers.isEmpty()) {
+                return false;
+            }
+
+            QString type = anyDecimal ? QStringLiteral("double") : QStringLiteral("int");
+            QString initial = anyDecimal ? QStringLiteral("0.0") : QStringLiteral("0");
+            QString accumulator = QStringLiteral("resultado%1").arg(m_tempCounter++);
+            
+            addCodeLine(QStringLiteral("%1 %2 = %3;").arg(type, accumulator, initial));
+            for (const QString &num : numbers) {
+                addCodeLine(QStringLiteral("%1 += %2;").arg(accumulator, num));
+            }
+            
+            // Show result
+            ensureInclude("iostream");
+            addCodeLine(QStringLiteral("std::cout << %1 << std::endl;").arg(accumulator));
+            
+            return true;
+        }
+        return false;
+    }
+
     bool handleRepeatMessage(const QString &original, const QString &normalized) {
         if (!normalized.startsWith(QStringLiteral("repetir"))) {
             return false;
@@ -1147,7 +1271,11 @@ private:
         QString literal = quoted(message);
         ensureInclude("iostream");
 
-        QString counter = QStringLiteral("i%1").arg(m_tempCounter++);
+        // Try to use simple 'i' first, then fall back to indexed names if needed
+        QString counter = QStringLiteral("i");
+        if (hasVariable(counter)) {
+            counter = QStringLiteral("i%1").arg(m_tempCounter++);
+        }
         addCodeLine(QStringLiteral("for (int %1 = 0; %1 < %2; ++%1) {").arg(counter, times));
         ++m_indentLevel;
         addCodeLine(QStringLiteral("std::cout << %1 << std::endl;").arg(literal));
@@ -1195,10 +1323,18 @@ private:
         }
 
         QString variable = sanitizedIdentifier(match.captured(1));
-        QString limit = ensureNumberString(match.captured(2), true);
-        QString increment = ensureNumberString(match.captured(3), true);
+        QString limitStr = match.captured(2);
+        QString incrementStr = match.captured(3);
+        
+        // Determine if we need double or int based on the numbers used
+        QString variableType = determineNumericType(limitStr, incrementStr);
+        bool isFloating = (variableType == QStringLiteral("double"));
+        
+        QString limit = ensureNumberString(limitStr, isFloating);
+        QString increment = ensureNumberString(incrementStr, isFloating);
+        QString defaultValue = getDefaultValueForType(variableType);
 
-        ensureVariable(variable, QStringLiteral("double"), QStringLiteral("0.0"));
+        ensureVariable(variable, variableType, defaultValue);
 
         addCodeLine(QStringLiteral("while (%1 < %2) {").arg(variable, limit));
         ++m_indentLevel;
@@ -1212,6 +1348,56 @@ private:
         Q_UNUSED(original);
         if (!normalized.startsWith(QStringLiteral("crear"))) {
             return false;
+        }
+
+        // Pattern: "crear lista de números Y con X elementos"
+        QRegularExpression reNumWithElements("^crear (?:una |un )?(lista|vector|arreglo) de (numeros? [a-z]+) con (\\d+) elementos$");
+        QRegularExpressionMatch mNumWithElements = reNumWithElements.match(normalized);
+        if (mNumWithElements.hasMatch()) {
+            QString alias = mNumWithElements.captured(1);
+            QString elementPhrase = mNumWithElements.captured(2).trimmed();
+            int size = mNumWithElements.captured(3).toInt();
+            QString elementType = elementTypeFromPhrase(elementPhrase);
+            QString aliasToken = sanitizedIdentifier(alias);
+            if (aliasToken.isEmpty()) {
+                aliasToken = QStringLiteral("lista");
+            }
+
+            QString baseName = getCollectionVariableName(elementPhrase, aliasToken, normalized);
+            QString variableName = uniqueName(baseName);
+            QString type = QStringLiteral("std::vector<%1>").arg(elementType);
+            ensureInclude("vector");
+            if (elementType == QStringLiteral("std::string")) {
+                ensureInclude("string");
+            }
+            addCodeLine(QStringLiteral("%1 %2(%3);").arg(type, variableName).arg(size));
+            registerCollection(variableName, {type, elementType, aliasToken, size, false, false});
+            return true;
+        }
+
+        // Pattern: "crear una lista de X números Y"
+        QRegularExpression reNumPattern("^crear (?:una |un )?(lista|vector|arreglo) de (\\d+) (numeros? [a-z]+)$");
+        QRegularExpressionMatch mNum = reNumPattern.match(normalized);
+        if (mNum.hasMatch()) {
+            QString alias = mNum.captured(1);
+            int size = mNum.captured(2).toInt();
+            QString elementPhrase = mNum.captured(3).trimmed();
+            QString elementType = elementTypeFromPhrase(elementPhrase);
+            QString aliasToken = sanitizedIdentifier(alias);
+            if (aliasToken.isEmpty()) {
+                aliasToken = QStringLiteral("lista");
+            }
+
+            QString baseName = getCollectionVariableName(elementPhrase, aliasToken, normalized);
+            QString variableName = uniqueName(baseName);
+            QString type = QStringLiteral("std::vector<%1>").arg(elementType);
+            ensureInclude("vector");
+            if (elementType == QStringLiteral("std::string")) {
+                ensureInclude("string");
+            }
+            addCodeLine(QStringLiteral("%1 %2(%3);").arg(type, variableName).arg(size));
+            registerCollection(variableName, {type, elementType, aliasToken, size, false, false});
+            return true;
         }
 
         // Specific pattern: lista/vector with size
@@ -1277,8 +1463,8 @@ private:
             return true;
         }
 
-        // Pattern: lista texto para guardar los paises
-        QRegularExpression reStore("^crear una lista de texto para guardar (los|las) ([a-z ]+)$");
+        // Pattern: lista texto para guardar los paises/países
+        QRegularExpression reStore("^crear una lista de texto para guardar (los|las) ([a-z\u00e1\u00e9\u00ed\u00f3\u00fa\u00fc\u00f1 ]+)$");
         QRegularExpressionMatch mStore = reStore.match(normalized);
         if (mStore.hasMatch()) {
             QString aliasWord = mStore.captured(2).trimmed();
@@ -1320,6 +1506,33 @@ private:
         return false;
     }
 
+    bool isDecimalNumber(const QString &numberStr) {
+        return numberStr.contains('.') || numberStr.contains(',');
+    }
+
+    QString determineNumericType(const QString &num1, const QString &num2 = QString()) {
+        bool hasDecimal = isDecimalNumber(num1);
+        if (!num2.isEmpty()) {
+            hasDecimal = hasDecimal || isDecimalNumber(num2);
+        }
+        return hasDecimal ? QStringLiteral("double") : QStringLiteral("int");
+    }
+
+    QString getDefaultValueForType(const QString &type) {
+        return (type == QStringLiteral("double")) ? QStringLiteral("0.0") : QStringLiteral("0");
+    }
+
+    QString getCollectionVariableName(const QString &elementPhrase, const QString &collectionType, const QString &normalized) {
+        // Generate more descriptive variable names based on context
+        if (elementPhrase.contains(QStringLiteral("decimal")) && normalized.contains(QStringLiteral("nota"))) {
+            return QStringLiteral("notas");
+        } else if (collectionType == QStringLiteral("vector")) {
+            return QStringLiteral("vector");
+        } else {
+            return QStringLiteral("lista");
+        }
+    }
+
     QString uniqueName(const QString &base) {
         QString candidate = base;
         int suffix = 1;
@@ -1337,7 +1550,7 @@ private:
         if (phrase.contains(QStringLiteral("decimal"))) {
             return QStringLiteral("double");
         }
-        if (phrase.contains(QStringLiteral("entero"))) {
+        if (phrase.contains(QStringLiteral("entero")) || phrase.contains(QStringLiteral("enteros"))) {
             return QStringLiteral("int");
         }
         return QStringLiteral("std::string");
@@ -1570,7 +1783,11 @@ private:
             }
 
             CollectionInfo info = m_collections.value(collectionName);
+            // Try to use simple 'i' first, then fall back to indexed names if needed
             QString indexName = QStringLiteral("i");
+            if (hasVariable(indexName)) {
+                indexName = QStringLiteral("i%1").arg(m_tempCounter++);
+            }
             
             if (info.isCArray) {
                 startBlock(QStringLiteral("for (std::size_t %1 = 0; %1 < %2; ++%1) {").arg(indexName).arg(info.size), 
@@ -1615,10 +1832,27 @@ private:
             notifyIssue(QStringLiteral("No se pudo determinar el tipo de datos de la colección."));
             return false;
         }
-        QString itemName = QStringLiteral("item%1").arg(m_tempCounter++);
+        
+        // Try to use simple 'item' first, then fall back to indexed names if needed
+        QString itemName = QStringLiteral("item");
+        if (hasVariable(itemName)) {
+            itemName = QStringLiteral("item%1").arg(m_tempCounter++);
+        }
         addCodeLine(QStringLiteral("for (const %1 &%2 : %3) {").arg(elementType, itemName, collectionName));
         ++m_indentLevel;
-        ensureVariable(destination, QStringLiteral("double"), QStringLiteral("0.0"));
+        
+        // Use appropriate type for sum variable based on collection element type
+        QString sumType = QStringLiteral("int");
+        QString sumDefault = QStringLiteral("0");
+        if (elementType == QStringLiteral("double")) {
+            sumType = QStringLiteral("double");
+            sumDefault = QStringLiteral("0.0");
+        } else if (elementType == QStringLiteral("float")) {
+            sumType = QStringLiteral("float");
+            sumDefault = QStringLiteral("0.0f");
+        }
+        
+        ensureVariable(destination, sumType, sumDefault);
         addCodeLine(QStringLiteral("%1 += %2;").arg(destination, itemName));
         --m_indentLevel;
         addCodeLine(QStringLiteral("}"));
@@ -1754,7 +1988,23 @@ private:
             return identifier;
         }
         
-        return trimmed;
+        // Handle common patterns like "el numero", "la variable", etc.
+        if (trimmed.startsWith(QStringLiteral("el ")) || trimmed.startsWith(QStringLiteral("la "))) {
+            QString withoutArticle = trimmed.mid(3).trimmed();
+            QString articleIdentifier = sanitizedIdentifier(withoutArticle);
+            if (hasVariable(articleIdentifier)) {
+                return articleIdentifier;
+            }
+            // If variable doesn't exist, create a generic variable
+            if (withoutArticle == QStringLiteral("numero")) {
+                if (!hasVariable(QStringLiteral("numero"))) {
+                    ensureVariable(QStringLiteral("numero"), QStringLiteral("int"), QStringLiteral("0"));
+                }
+                return QStringLiteral("numero");
+            }
+        }
+        
+        return sanitizedIdentifier(trimmed);
     }
 
     bool handleElse(const QString &original, const QString &normalized) {
@@ -1778,11 +2028,15 @@ private:
         m_blocks.last().autoClose = true;
         m_blocks.last().indent = m_currentIndent;
 
-        QString message = readQuotedText(original);
-        if (!message.isEmpty()) {
-            ensureInclude("iostream");
-            addCodeLine(QStringLiteral("std::cout << %1 << std::endl;").arg(quoted(message)));
+        // Check if there's content after "sino"
+        if (normalized.startsWith(QStringLiteral("sino mostrar")) || normalized.startsWith(QStringLiteral("sino imprimir"))) {
+            QString message = readQuotedText(original);
+            if (!message.isEmpty()) {
+                ensureInclude("iostream");
+                addCodeLine(QStringLiteral("std::cout << %1 << std::endl;").arg(quoted(message)));
+            }
         }
+        
         return true;
     }
 
@@ -1803,7 +2057,7 @@ private:
                 appendedVar = tail.mid(2).trimmed();
                 // Don't sanitize the variable name, use it directly for loop variables like 'i'
                 if (appendedVar == QStringLiteral("i") || appendedVar == QStringLiteral("idx")) {
-                    appendedVar = appendedVar; // Keep as is
+                    // Keep as is - no need to assign to itself
                 } else {
                     appendedVar = sanitizedIdentifier(appendedVar);
                 }
@@ -1850,8 +2104,19 @@ private:
         CollectionInfo info = m_collections.value(collection);
         ensureInclude("iostream");
 
-        QString indexName = QStringLiteral("i%1").arg(m_tempCounter++);
-        const QString promptLine = QStringLiteral(R"(std::cout << "Ingrese el valor " << (%1 + 1) << ": ";)");
+        // Try to use simple 'i' first, then fall back to indexed names if needed
+        QString indexName = QStringLiteral("i");
+        if (hasVariable(indexName)) {
+            indexName = QStringLiteral("i%1").arg(m_tempCounter++);
+        }
+        
+        // Determine the appropriate prompt based on element type and collection name
+        QString promptLine;
+        if (info.elementType == QStringLiteral("double") && collection.contains(QStringLiteral("nota"))) {
+            promptLine = QStringLiteral(R"(std::cout << "Ingrese la nota " << (%1 + 1) << ": ";)");
+        } else {
+            promptLine = QStringLiteral(R"(std::cout << "Ingrese el valor " << (%1 + 1) << ": ";)");
+        }
 
         if (info.isCArray) {
             if (info.size <= 0) {
@@ -1892,6 +2157,10 @@ private:
                 collectionAlias = match.captured(2);
                 matched = true;
             }
+        } else if (normalized.startsWith(QStringLiteral("ingresar valor de cada")) && normalized.contains(QStringLiteral("lista"))) {
+            // Handle "ingresar valor de cada nota en la lista"
+            matched = true;
+            collectionAlias = QStringLiteral("lista");
         }
 
         if (!matched) {
@@ -1901,10 +2170,36 @@ private:
         return requestInputForCollection(collectionAlias);
     }
 
+    bool handleRequestNumberInput(const QString &original, const QString &normalized) {
+        Q_UNUSED(original);
+        
+        // Handle patterns like "pedir al usuario que ingrese cada número por consola"
+        if ((normalized.contains(QStringLiteral("pedir al usuario")) && normalized.contains(QStringLiteral("ingrese")) && normalized.contains(QStringLiteral("numero"))) ||
+            (normalized.contains(QStringLiteral("solicitar")) && normalized.contains(QStringLiteral("usuario")) && normalized.contains(QStringLiteral("numero"))) ||
+            (normalized.contains(QStringLiteral("pedir")) && normalized.contains(QStringLiteral("ingrese")) && normalized.contains(QStringLiteral("consola")))) {
+            
+            // Use the last created collection
+            return requestInputForCollection(QStringLiteral(""));
+        }
+        
+        return false;
+    }
+
     bool handlePrintCollection(const QString &original, const QString &normalized) {
         Q_UNUSED(original);
-        if (!normalized.startsWith(QStringLiteral("imprimir todos los elementos del")) &&
-            !normalized.startsWith(QStringLiteral("mostrar todos los elementos del"))) {
+        
+        // Detect various patterns for printing collection elements
+        bool isPrintCollectionInstruction = false;
+        if (normalized.startsWith(QStringLiteral("imprimir todos los elementos del")) ||
+            normalized.startsWith(QStringLiteral("mostrar todos los elementos del")) ||
+            normalized.startsWith(QStringLiteral("imprimir todos los elementos de")) ||
+            normalized.startsWith(QStringLiteral("mostrar todos los elementos de")) ||
+            (normalized.contains(QStringLiteral("imprimir")) && normalized.contains(QStringLiteral("todos los elementos")) && (normalized.contains(QStringLiteral("vector")) || normalized.contains(QStringLiteral("lista")) || normalized.contains(QStringLiteral("arreglo")))) ||
+            (normalized.contains(QStringLiteral("mostrar")) && normalized.contains(QStringLiteral("todos los elementos")) && (normalized.contains(QStringLiteral("vector")) || normalized.contains(QStringLiteral("lista")) || normalized.contains(QStringLiteral("arreglo"))))) {
+            isPrintCollectionInstruction = true;
+        }
+        
+        if (!isPrintCollectionInstruction) {
             return false;
         }
 
@@ -1915,7 +2210,12 @@ private:
 
         CollectionInfo info = m_collections.value(collection);
         ensureInclude("iostream");
-        QString indexName = QStringLiteral("valor%1").arg(m_tempCounter++);
+        
+        // Try to use simple 'valor' first, then fall back to indexed names if needed
+        QString indexName = QStringLiteral("valor");
+        if (hasVariable(indexName)) {
+            indexName = QStringLiteral("valor%1").arg(m_tempCounter++);
+        }
         if (info.isCArray) {
             if (info.size <= 0) {
                 notifyIssue(QStringLiteral("No se conoce el tamaño del arreglo para imprimir sus elementos."));
@@ -1939,8 +2239,30 @@ private:
 
     bool handleReadDataFile(const QString &original, const QString &normalized) {
         Q_UNUSED(original);
-        if (!normalized.startsWith(QStringLiteral("leer los datos"))) {
+        
+        // Detect various data reading patterns
+        bool isDataReadInstruction = false;
+        if (normalized.startsWith(QStringLiteral("leer los datos")) ||
+            normalized.startsWith(QStringLiteral("cargar los datos")) ||
+            normalized.startsWith(QStringLiteral("importar los datos")) ||
+            normalized.startsWith(QStringLiteral("leer desde")) ||
+            normalized.startsWith(QStringLiteral("cargar desde")) ||
+            normalized.startsWith(QStringLiteral("importar desde")) ||
+            (normalized.contains(QStringLiteral("leer")) && normalized.contains(QStringLiteral("archivo"))) ||
+            (normalized.contains(QStringLiteral("cargar")) && normalized.contains(QStringLiteral("archivo"))) ||
+            (normalized.contains(QStringLiteral("importar")) && normalized.contains(QStringLiteral("archivo")))) {
+            isDataReadInstruction = true;
+        }
+        
+        if (!isDataReadInstruction) {
             return false;
+        }
+
+        // Check if data file is loaded
+        if (m_input.dataFileContents.trimmed().isEmpty()) {
+            notifyIssue(QStringLiteral("Error: No se ha cargado ningún archivo de datos. Use el botón 'Cargar Datos' para cargar un archivo .txt antes de usar instrucciones de lectura de datos."));
+            m_success = false;
+            return true; // Return true to indicate we handled the instruction
         }
 
         QRegularExpression re("archivo llamado ([^\\s]+)");
@@ -1950,9 +2272,8 @@ private:
             fileName = m_dataFileName;
         }
 
-        if (!m_input.dataFileContents.trimmed().isEmpty()) {
-            ensureDataFileWritten(fileName, m_input.dataFileContents);
-        }
+        // Data is already loaded, no need to write file
+        // ensureDataFileWritten(fileName, m_input.dataFileContents);
 
         QString paises = collectionNameForAlias(QStringLiteral("paises"));
         QString capitales = collectionNameForAlias(QStringLiteral("capitales"));
@@ -1965,38 +2286,99 @@ private:
             }
         }
 
-        ensureInclude("fstream");
-        ensureInclude("sstream");
-        ensureInclude("string");
+        if (paises.isEmpty() || capitales.isEmpty()) {
+            notifyIssue(QStringLiteral("Error: No se encontraron las listas de países y capitales. Asegúrese de crear las listas antes de leer los datos."));
+            return false;
+        }
+
+        // Process the loaded data directly
+        QStringList lines = m_input.dataFileContents.split(QRegularExpression("[\\r\\n]+"), Qt::SkipEmptyParts);
+        
         ensureInclude("vector");
+        ensureInclude("string");
         ensureInclude("iostream");
-        addCodeLine(QStringLiteral("std::ifstream archivo(%1);").arg(quoted(fileName)));
-        addCodeLine(QStringLiteral("if (!archivo) {"));
-        ++m_indentLevel;
-        addCodeLine(QStringLiteral("std::cerr << \"No se pudo abrir %1\" << std::endl;").arg(escapeForStringLiteral(fileName)));
-        addCodeLine(QStringLiteral("return 1;"));
-        --m_indentLevel;
-        addCodeLine(QStringLiteral("}"));
-        addCodeLine(QStringLiteral("std::string linea;"));
-        addCodeLine(QStringLiteral("while (std::getline(archivo, linea)) {"));
-        ++m_indentLevel;
-        addCodeLine(QStringLiteral("std::stringstream ss(linea);"));
-        addCodeLine(QStringLiteral("std::string campo1;"));
-        addCodeLine(QStringLiteral("std::string campo2;"));
-        addCodeLine(QStringLiteral("if (std::getline(ss, campo1, ',') && std::getline(ss, campo2)) {"));
-        ++m_indentLevel;
-        if (!paises.isEmpty()) {
-            addCodeLine(QStringLiteral("%1.push_back(campo1);").arg(paises));
+        
+        addCodeLine(QStringLiteral("// Cargar datos desde archivo cargado"));
+        
+        for (const QString &line : lines) {
+            QString trimmedLine = line.trimmed();
+            if (trimmedLine.isEmpty()) continue;
+            
+            QStringList parts = trimmedLine.split(',');
+            if (parts.size() >= 2) {
+                QString pais = parts[0].trimmed();
+                QString capital = parts[1].trimmed();
+                
+                // Add the country and capital to their respective vectors
+                addCodeLine(QStringLiteral("%1.push_back(%2);").arg(paises, quoted(pais)));
+                addCodeLine(QStringLiteral("%1.push_back(%2);").arg(capitales, quoted(capital)));
+            }
         }
-        if (!capitales.isEmpty()) {
-            addCodeLine(QStringLiteral("%1.push_back(campo2);").arg(capitales));
+        
+        // Update collection info with actual data count
+        int dataCount = 0;
+        for (const QString &line : lines) {
+            if (!line.trimmed().isEmpty() && line.contains(',')) {
+                dataCount++;
+            }
         }
-        --m_indentLevel;
-        addCodeLine(QStringLiteral("}"));
-        --m_indentLevel;
-        addCodeLine(QStringLiteral("}"));
-        m_requiresDataFile = true;
+        
+        // Update the collections with the actual size
+        auto paisesIt = m_collections.find(paises);
+        if (paisesIt != m_collections.end()) {
+            paisesIt.value().size = dataCount;
+        }
+        auto capitalesIt = m_collections.find(capitales);
+        if (capitalesIt != m_collections.end()) {
+            capitalesIt.value().size = dataCount;
+        }
         return true;
+    }
+
+    bool handleRequiresDataFile(const QString &original, const QString &normalized) {
+        Q_UNUSED(original);
+        
+        // Additional patterns that might require data files
+        bool requiresData = false;
+        
+        if ((normalized.contains(QStringLiteral("procesar")) && normalized.contains(QStringLiteral("archivo"))) ||
+            (normalized.contains(QStringLiteral("abrir")) && normalized.contains(QStringLiteral("archivo"))) ||
+            (normalized.contains(QStringLiteral("usar")) && normalized.contains(QStringLiteral("archivo"))) ||
+            (normalized.contains(QStringLiteral("acceder")) && normalized.contains(QStringLiteral("archivo"))) ||
+            (normalized.contains(QStringLiteral("obtener")) && normalized.contains(QStringLiteral("datos"))) ||
+            (normalized.contains(QStringLiteral("extraer")) && normalized.contains(QStringLiteral("datos")))) {
+            requiresData = true;
+        }
+        
+        if (!requiresData) {
+            return false;
+        }
+        
+        // Check if data file is loaded
+        if (m_input.dataFileContents.trimmed().isEmpty()) {
+            notifyIssue(QStringLiteral("Error: Esta instrucción requiere datos de archivo. Use el botón 'Cargar Datos' para cargar un archivo .txt antes de proceder."));
+            m_success = false;
+            return true;
+        }
+        
+        // If data is available, let other handlers process the instruction
+        return false;
+    }
+
+    bool handleStoreNumbers(const QString &original, const QString &normalized) {
+        Q_UNUSED(original);
+        
+        // Pattern: "guardar los números en el vector/lista/arreglo"
+        if (normalized.startsWith(QStringLiteral("guardar los numeros en")) ||
+            (normalized.contains(QStringLiteral("guardar")) && normalized.contains(QStringLiteral("numeros")) && 
+            (normalized.contains(QStringLiteral("vector")) || normalized.contains(QStringLiteral("lista")) || normalized.contains(QStringLiteral("arreglo"))))) {
+            
+            // This is an organic instruction that doesn't need explicit code generation
+            // The numbers are typically already being stored through input operations
+            return true;
+        }
+        
+        return false;
     }
 
     void ensureDataFileWritten(const QString &fileName, const QString &contents) {
@@ -2022,22 +2404,47 @@ private:
 
     bool handlePrintPairs(const QString &original, const QString &normalized) {
         Q_UNUSED(original);
-        if (!normalized.startsWith(QStringLiteral("imprimir los paises"))) {
+        
+        // Detect specific patterns for printing country-capital pairs
+        bool isPrintPairsInstruction = false;
+        if (normalized.startsWith(QStringLiteral("imprimir los paises")) ||
+            normalized.startsWith(QStringLiteral("mostrar los paises")) ||
+            (normalized.contains(QStringLiteral("imprimir")) && normalized.contains(QStringLiteral("paises")) && normalized.contains(QStringLiteral("capitales"))) ||
+            (normalized.contains(QStringLiteral("mostrar")) && normalized.contains(QStringLiteral("paises")) && normalized.contains(QStringLiteral("capitales")))) {
+            isPrintPairsInstruction = true;
+        }
+        
+        if (!isPrintPairsInstruction) {
             return false;
+        }
+        
+        // Check if data file is loaded for operations that depend on it
+        if (m_input.dataFileContents.trimmed().isEmpty()) {
+            notifyIssue(QStringLiteral("Error: Esta instrucción requiere datos cargados de un archivo. Use el botón 'Cargar Datos' para cargar un archivo .txt con el formato 'País,Capital' antes de proceder."));
+            m_success = false;
+            return true;
         }
 
         QString paises = collectionNameForAlias(QStringLiteral("paises"));
         QString capitales = collectionNameForAlias(QStringLiteral("capitales"));
         if (paises.isEmpty() || capitales.isEmpty()) {
+            notifyIssue(QStringLiteral("Error: No se encontraron las listas de países y capitales. Asegúrese de crear las listas antes de imprimir."));
             return false;
         }
 
         ensureInclude("iostream");
         ensureInclude("vector");
         ensureInclude("string");
-        addCodeLine(QStringLiteral("for (std::size_t i = 0; i < %1.size() && i < %2.size(); ++i) {").arg(paises, capitales));
+        
+        // Try to use simple 'i' first, then fall back to indexed names if needed
+        QString indexName = QStringLiteral("i");
+        if (hasVariable(indexName)) {
+            indexName = QStringLiteral("i%1").arg(m_tempCounter++);
+        }
+        
+        addCodeLine(QStringLiteral("for (std::size_t %1 = 0; %1 < %2.size() && %1 < %3.size(); ++%1) {").arg(indexName, paises, capitales));
         ++m_indentLevel;
-        addCodeLine(QStringLiteral("std::cout << %1[i] << \" - \" << %2[i] << std::endl;").arg(paises, capitales));
+        addCodeLine(QStringLiteral("std::cout << %1[%2] << \" - \" << %3[%2] << std::endl;").arg(paises, indexName, capitales));
         --m_indentLevel;
         addCodeLine(QStringLiteral("}"));
         return true;
@@ -2187,7 +2594,11 @@ private:
 
         ensureInclude("iostream");
         
+        // Try to use simple 'i' first, then fall back to indexed names if needed
         QString indexName = QStringLiteral("i");
+        if (hasVariable(indexName)) {
+            indexName = QStringLiteral("i%1").arg(m_tempCounter++);
+        }
         addCodeLine(QStringLiteral("for (std::size_t %1 = 0; %1 < %2.size(); ++%1) {").arg(indexName, collectionName));
         ++m_indentLevel;
         

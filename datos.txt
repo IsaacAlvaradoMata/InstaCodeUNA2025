@@ -1,0 +1,5 @@
+Costa Rica,San José
+México,Ciudad de México
+España,Madrid
+Francia,París
+Alemania,Berlín
