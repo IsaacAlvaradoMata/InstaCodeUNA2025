@@ -313,6 +313,7 @@ private:
         if (handleAssignValue(original, core)) return true;
         if (handleVariableOperation(original, core)) return true;
         if (handleCalculateExpression(original, core)) return true;
+        if (handleCalculateAverage(original, core)) return true;
         if (handleUserInput(original, core)) return true;
         if (handleRequestNumberInput(original, core)) return true;
         if (handleInputValue(original, core)) return true;
@@ -1015,6 +1016,61 @@ private:
         return true;
     }
 
+    bool handleCalculateAverage(const QString &original, const QString &normalized) {
+        Q_UNUSED(original);
+        
+        // Pattern: "mostrar el promedio es total" or similar patterns with division
+        if ((normalized.contains(QStringLiteral("promedio")) && normalized.contains(QStringLiteral("mostrar"))) ||
+            (normalized.contains(QStringLiteral("promedio")) && normalized.contains(QStringLiteral("imprimir")))) {
+            
+            // Extract the variable that contains the sum
+            QString message = readQuotedText(original);
+            QString appendedVar;
+
+            int firstQuote = original.indexOf('"');
+            int secondQuote = (firstQuote >= 0) ? original.indexOf('"', firstQuote + 1) : -1;
+            if (secondQuote >= 0) {
+                QString tail = original.mid(secondQuote + 1).trimmed();
+                if (tail.startsWith(QStringLiteral("y "))) {
+                    appendedVar = tail.mid(2).trimmed();
+                    appendedVar = sanitizedIdentifier(appendedVar);
+                }
+            }
+            
+            if (!appendedVar.isEmpty() && hasVariable(appendedVar)) {
+                // Find the collection that was used to calculate the sum
+                QString targetCollection = lastCollection();
+                if (!targetCollection.isEmpty()) {
+                    int collectionSize = m_collections.value(targetCollection).size;
+                    if (collectionSize > 0) {
+                        // Create promedio variable and calculate it
+                        QString promedioVar = QStringLiteral("promedio");
+                        if (hasVariable(promedioVar)) {
+                            promedioVar = QStringLiteral("promedio%1").arg(m_tempCounter++);
+                        }
+                        
+                        QString varType = variableType(appendedVar);
+                        if (varType.isEmpty()) varType = QStringLiteral("double");
+                        
+                        addCodeLine(QStringLiteral("%1 %2 = %3 / %4.0;").arg(varType, promedioVar, appendedVar).arg(collectionSize));
+                        
+                        QStringList parts;
+                        if (!message.isEmpty()) {
+                            parts << quoted(message);
+                        }
+                        parts << promedioVar;
+
+                        ensureInclude("iostream");
+                        addCodeLine(QStringLiteral("std::cout << %1 << std::endl;").arg(parts.join(QStringLiteral(" << "))));
+                        return true;
+                    }
+                }
+            }
+        }
+        
+        return false;
+    }
+
     bool handleInputValue(const QString &original, const QString &normalized) {
         Q_UNUSED(original);
         QString core;
@@ -1610,11 +1666,11 @@ private:
             return true;
         }
 
-        // Pattern: lista texto para guardar los paises/países
-        QRegularExpression reStore("^crear una lista de texto para guardar (los|las) ([a-z\u00e1\u00e9\u00ed\u00f3\u00fa\u00fc\u00f1 ]+)$");
+        // Pattern: lista texto para guardar cualquier cosa
+        QRegularExpression reStore("^crear (?:una |un )?lista de texto para guardar (?:los |las )?([a-z\u00e1\u00e9\u00ed\u00f3\u00fa\u00fc\u00f1 ]+)$");
         QRegularExpressionMatch mStore = reStore.match(normalized);
         if (mStore.hasMatch()) {
-            QString aliasWord = mStore.captured(2).trimmed();
+            QString aliasWord = mStore.captured(1).trimmed();
             QString variableName = sanitizedIdentifier(aliasWord);
             if (variableName.isEmpty()) {
                 variableName = QStringLiteral("lista");
@@ -1628,6 +1684,36 @@ private:
             ensureInclude("string");
             addCodeLine(QStringLiteral("%1 %2;").arg(type, variableName));
             registerCollection(variableName, {type, QStringLiteral("std::string"), aliasToken, 0, false, false});
+            return true;
+        }
+        
+        // Pattern: lista de números decimales para guardar cualquier cosa
+        QRegularExpression reStoreNum("^crear (?:una |un )?lista de (?:numeros? )?(?:decimales?|enteros?) para guardar (?:los |las )?([a-z\u00e1\u00e9\u00ed\u00f3\u00fa\u00fc\u00f1 ]+)$");
+        QRegularExpressionMatch mStoreNum = reStoreNum.match(normalized);
+        if (mStoreNum.hasMatch()) {
+            QString aliasWord = mStoreNum.captured(1).trimmed();
+            QString variableName = sanitizedIdentifier(aliasWord);
+            if (variableName.isEmpty()) {
+                variableName = QStringLiteral("lista");
+            }
+            QString aliasToken = sanitizedIdentifier(aliasWord);
+            if (aliasToken.isEmpty()) {
+                aliasToken = QStringLiteral("lista");
+            }
+            
+            QString elementType;
+            QString type;
+            if (normalized.contains(QStringLiteral("decimal"))) {
+                elementType = QStringLiteral("double");
+                type = QStringLiteral("std::vector<double>");
+            } else {
+                elementType = QStringLiteral("int");
+                type = QStringLiteral("std::vector<int>");
+            }
+            
+            ensureInclude("vector");
+            addCodeLine(QStringLiteral("%1 %2;").arg(type, variableName));
+            registerCollection(variableName, {type, elementType, aliasToken, 0, false, false});
             return true;
         }
 
@@ -1990,8 +2076,6 @@ private:
         if (hasVariable(itemName)) {
             itemName = QStringLiteral("item%1").arg(m_tempCounter++);
         }
-        addCodeLine(QStringLiteral("for (const %1 &%2 : %3) {").arg(elementType, itemName, collectionName));
-        ++m_indentLevel;
         
         // Use appropriate type for sum variable based on collection element type
         QString sumType = QStringLiteral("int");
@@ -2004,7 +2088,11 @@ private:
             sumDefault = QStringLiteral("0.0f");
         }
         
+        // Ensure the destination variable exists BEFORE the loop
         ensureVariable(destination, sumType, sumDefault);
+        
+        addCodeLine(QStringLiteral("for (const %1 &%2 : %3) {").arg(elementType, itemName, collectionName));
+        ++m_indentLevel;
         addCodeLine(QStringLiteral("%1 += %2;").arg(destination, itemName));
         --m_indentLevel;
         addCodeLine(QStringLiteral("}"));
@@ -2433,6 +2521,9 @@ private:
             normalized.startsWith(QStringLiteral("leer desde")) ||
             normalized.startsWith(QStringLiteral("cargar desde")) ||
             normalized.startsWith(QStringLiteral("importar desde")) ||
+            normalized.startsWith(QStringLiteral("leer los datos desde")) ||
+            normalized.startsWith(QStringLiteral("cargar los datos desde")) ||
+            normalized.startsWith(QStringLiteral("importar los datos desde")) ||
             (normalized.contains(QStringLiteral("leer")) && normalized.contains(QStringLiteral("archivo"))) ||
             (normalized.contains(QStringLiteral("cargar")) && normalized.contains(QStringLiteral("archivo"))) ||
             (normalized.contains(QStringLiteral("importar")) && normalized.contains(QStringLiteral("archivo")))) {
@@ -2451,9 +2542,18 @@ private:
         }
 
         // Extract filename from instruction if specified
-        QRegularExpression re("archivo llamado ([^\\s]+)");
+        QRegularExpression re("archivo llamado ([^\\s,\\.]+(?:\\.[^\\s,]+)?)");
         QRegularExpressionMatch match = re.match(normalized);
         QString fileName = match.hasMatch() ? match.captured(1).trimmed() : m_dataFileName;
+        
+        // Also try alternative patterns
+        if (!match.hasMatch()) {
+            QRegularExpression re2("desde archivo ([^\\s,\\.]+(?:\\.[^\\s,]+)?)");
+            QRegularExpressionMatch match2 = re2.match(normalized);
+            if (match2.hasMatch()) {
+                fileName = match2.captured(1).trimmed();
+            }
+        }
         if (fileName.isEmpty()) {
             fileName = m_dataFileName;
         }

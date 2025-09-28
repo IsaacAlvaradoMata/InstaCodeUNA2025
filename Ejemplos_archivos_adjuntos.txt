@@ -1,0 +1,121 @@
+EJEMPLOS ADICIONALES PARA USO DE ARCHIVOS ADJUNTOS
+====================================================
+
+El sistema permite cargar datos desde archivos .txt externos con diferentes nombres y tipos de contenido.
+Estos ejemplos muestran casos de uso más allá del ejemplo básico de países y capitales.
+
+EJEMPLO 1: INVENTARIO DE PRODUCTOS
+==================================
+
+Instrucciones en lenguaje natural:
+----------------------------------
+Crear lista de texto para guardar productos
+Crear lista de números decimales para guardar precios
+Leer los datos desde archivo llamado inventario.txt
+Mostrar todos los elementos del vector
+
+Archivo inventario.txt:
+----------------------
+Laptop,1299.99
+Mouse,29.50
+Teclado,85.00
+Monitor,450.00
+Impresora,320.75
+
+
+EJEMPLO 2: CALIFICACIONES DE ESTUDIANTES
+========================================
+
+Instrucciones en lenguaje natural:
+----------------------------------
+Crear lista de texto para guardar nombres
+Crear lista de números decimales para guardar notas
+Leer los datos desde archivo llamado calificaciones.txt
+Recorrer la lista y sumar cada elemento en total
+Mostrar "El promedio es: " y total
+
+Archivo calificaciones.txt:
+---------------------------
+Juan,85.5
+María,92.0
+Pedro,78.5
+Ana,96.0
+Carlos,88.0
+
+
+EJEMPLO 3: TEMPERATURAS MENSUALES
+=================================
+
+Instrucciones en lenguaje natural:
+----------------------------------
+Crear lista de texto para guardar meses
+Crear lista de números decimales para guardar temperaturas
+Leer los datos desde archivo llamado clima.txt
+Imprimir todos los elementos de la lista
+
+Archivo clima.txt:
+-----------------
+Enero,18.5
+Febrero,20.2
+Marzo,22.8
+Abril,25.1
+Mayo,27.5
+Junio,30.0
+
+
+EJEMPLO 4: DATOS NUMÉRICOS SIMPLES
+==================================
+
+Instrucciones en lenguage natural:
+----------------------------------
+Crear lista de números enteros con 10 elementos
+Leer los datos desde archivo llamado numeros.txt
+Recorrer la lista y sumar cada elemento al total
+Mostrar "La suma total es: " y total
+
+Archivo numeros.txt:
+-------------------
+125
+890
+456
+789
+234
+567
+123
+678
+345
+901
+
+
+CARACTERÍSTICAS DEL SISTEMA
+===========================
+
+1. NOMBRES DE ARCHIVOS PERSONALIZADOS:
+   - Se puede especificar cualquier nombre: "archivo llamado miarchivo.txt"
+   - Si no se especifica, usa "datos.txt" por defecto
+
+2. TIPOS DE DATOS SOPORTADOS:
+   - Texto (std::string)
+   - Números enteros (int)
+   - Números decimales (double)
+
+3. FORMATOS SOPORTADOS:
+   - Una columna: cada línea es un valor
+   - Múltiples columnas: separadas por comas (CSV)
+
+4. INSTRUCCIONES VÁLIDAS:
+   - "leer los datos desde archivo llamado X.txt"
+   - "cargar los datos desde archivo llamado X.txt"
+   - "importar los datos desde archivo llamado X.txt"
+   - "leer desde archivo llamado X.txt"
+
+5. REQUISITOS:
+   - Crear las listas ANTES de leer los datos
+   - Las listas se llenan en el orden que fueron creadas
+   - Para múltiples columnas: número de listas = número de columnas
+   - Archivo debe ser texto plano UTF-8
+
+6. OPERACIONES ADICIONALES:
+   - Suma automática con "recorrer la lista y sumar cada elemento"
+   - Cálculo de promedio con "mostrar el promedio es: " y variable
+   - Impresión de elementos con "imprimir todos los elementos"
