@@ -11,60 +11,65 @@
 #include <QLabel>
 #include <QTimer>
 
-class Window : public QMainWindow {
+class Window : public QMainWindow
+{
     Q_OBJECT
 
 public:
     Window(QWidget *parent = nullptr);
     ~Window();
 
-    enum class AlertType {Info, Success, Warning, Error};
+    enum class AlertType
+    {
+        Info,
+        Success,
+        Warning,
+        Error
+    };
 
 private slots:
     void loadFile();
     void loadDataFile();
     void convertToCpp();
     void exportCppFile();
-    void toggleTheme(); // <-- DECLARACIÓN DEL NUEVO SLOT
+    void toggleTheme();
 
     void showAlert(AlertType type,
-                   const QString& title,
-                   const QString& message,
+                   const QString &title,
+                   const QString &message,
                    int autoCloseMs = 0);
     void hideAlert();
 
 protected:
-    void resizeEvent(QResizeEvent* e) override;
-    bool eventFilter(QObject* obj, QEvent* event) override;
+    void resizeEvent(QResizeEvent *e) override;
+    bool eventFilter(QObject *obj, QEvent *event) override;
 
 private:
     void buildAlertOverlay();
     void applyAlertStyle(AlertType type);
 
     void setupUI();
-    void applyStylesheet(const QString &path); // <-- DECLARACIÓN DEL NUEVO MÉTODO
+    void applyStylesheet(const QString &path);
 
-    // Widgets
     QTextEdit *inputTextEdit;
     QTextEdit *outputTextEdit;
     QPushButton *loadButton;
     QPushButton *dataButton;
     QPushButton *convertButton;
     QPushButton *exportButton;
-    QPushButton *themeButton; // <-- DECLARACIÓN DEL NUEVO BOTÓN
+    QPushButton *themeButton;
 
-    // Variables de estado
-    bool isDarkTheme;         // <-- DECLARACIÓN DEL FLAG DE TEMA
+    bool isDarkTheme;
     QString dataFilePath;
     QString dataFileContents;
 
-    QWidget     *m_alertOverlay  = nullptr; // capa semitransparente (bloquea clicks)
-    QWidget     *m_alertCard     = nullptr; // el “card” centrado
-    QLabel      *m_alertIcon     = nullptr;
-    QLabel      *m_alertTitle    = nullptr;
-    QLabel      *m_alertMessage  = nullptr;
-    QPushButton *m_alertClose    = nullptr;
-    QTimer       m_alertTimer;    
+    QWidget *m_alertOverlay = nullptr;
+    QWidget *m_alertCard = nullptr;
+    QLabel *m_alertIcon = nullptr;
+    QLabel *m_alertTitle = nullptr;
+    QLabel *m_alertMessage = nullptr;
+    QPushButton *m_alertClose = nullptr;
+    QTimer m_alertTimer;
 };
 
-#endif // WINDOW_H
+#endif

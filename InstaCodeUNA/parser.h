@@ -21,4 +21,4 @@ public:
     static Output convert(const Input &input);
 };
 
-#endif // PARSER_H
+#endif 

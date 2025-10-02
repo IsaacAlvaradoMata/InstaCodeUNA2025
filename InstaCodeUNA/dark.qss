@@ -1,13 +1,9 @@
-/* filepath: /Users/crossac09/Documents/GitHub/InstaCodeUNA2025/InstaCodeUNA/dark.qss */
-/* --- Tema Oscuro --- */
-
-/* Ventana Principal */
 QMainWindow {
     background-color: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
                                       stop: 0 #2c3e50, stop: 1 #34495e);
 }
 
-/* Cuadros de Texto */
+
 QTextEdit {
     background-color: #2d2d2d;
     color: #f0f0f0;
@@ -20,20 +16,18 @@ QTextEdit:focus {
     border: 1px solid #3498db;
 }
 
-/* Botones */
+
 QPushButton {
     padding: 8px;
     font-size: 14px;
     border: 1px solid #555;
     border-radius: 4px;
-    color: #ffffff; /* Texto por defecto en tema oscuro */
+    color: #ffffff; 
 }
 
-/* Botones: tonos más oscuros para tema oscuro */
 
-/* --- Botón Cargar (azul más oscuro) --- */
 #loadButton {
-    background-color: #2b6ea3; /* base azul oscuro */
+    background-color: #2b6ea3; 
     color: #ffffff;
 }
 #loadButton:hover {
@@ -45,9 +39,9 @@ QPushButton {
     padding-bottom: 7px;
 }
 
-/* --- Botón Convertir (verde más oscuro) --- */
+
 #convertButton {
-    background-color: #229955; /* base verde oscuro */
+    background-color: #229955;
     color: #ffffff;
 }
 #convertButton:hover {
@@ -59,9 +53,8 @@ QPushButton {
     padding-bottom: 7px;
 }
 
-/* --- Botón Exportar (naranja más oscuro) --- */
 #exportButton {
-    background-color: #b36118; /* base naranja oscuro */
+    background-color: #b36118;
     color: #ffffff;
 }
 #exportButton:hover {
@@ -73,9 +66,8 @@ QPushButton {
     padding-bottom: 7px;
 }
 
-/* --- Botón Cambiar Tema (morado más oscuro) --- */
 #themeButton {
-    background-color: #6f2d86; /* base morado oscuro */
+    background-color: #6f2d86; 
     color: #ffffff;
 }
 #themeButton:hover {
@@ -87,9 +79,8 @@ QPushButton {
     padding-bottom: 7px;
 }
 
-/* --- Botón Insertar Datos --- */
 #dataButton {
-    background-color: #86832dff; /* base morado oscuro */
+    background-color: #86832dff; 
     color: #ffffff;
 }
 #dataButton:hover {

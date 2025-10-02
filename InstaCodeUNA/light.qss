@@ -1,15 +1,13 @@
-/* Estilo base para todos los botones */
 QPushButton {
     padding: 8px;
     font-size: 14px;
     border: 1px solid #CCCCCC;
     border-radius: 4px;
-    color: black; /* Color de texto para todos */
+    color: black;
 }
 
-/* --- Botón Cargar --- */
 #loadButton {
-    background-color: #3498db; /* Azul */
+    background-color: #3498db; 
 }
 #loadButton:hover {
     background-color: #5dade2;
@@ -20,9 +18,8 @@ QPushButton {
     padding-bottom: 7px;
 }
 
-/* --- Botón Convertir --- */
 #convertButton {
-    background-color: #2ecc71; /* Verde */
+    background-color: #2ecc71; 
 }
 #convertButton:hover {
     background-color: #58d68d;
@@ -33,9 +30,8 @@ QPushButton {
     padding-bottom: 7px;
 }
 
-/* --- Botón Exportar --- */
 #exportButton {
-    background-color: #e67e22; /* Naranja */
+    background-color: #e67e22;
 }
 #exportButton:hover {
     background-color: #eb984e;
@@ -46,9 +42,8 @@ QPushButton {
     padding-bottom: 7px;
 }
 
-/* --- Botón Cambiar Tema --- */
 #themeButton {
-    background-color: #8e44ad; /* Morado */
+    background-color: #8e44ad; 
 }
 #themeButton:hover {
     background-color: #9b59b6;
@@ -59,9 +54,8 @@ QPushButton {
     padding-bottom: 7px;
 }
 
-/* --- Botón Insertar Datos --- */
 #dataButton {
-    background-color: #a8ad44ff; /* Morado */
+    background-color: #a8ad44ff;
 }
 #dataButton:hover {
     background-color: #b1b659ff;
@@ -72,25 +66,20 @@ QPushButton {
     padding-bottom: 7px;
 }
 
-
-/* ... tus otros estilos ... */
-
-/* Estilo para la ventana principal con fondo degradado */
 QMainWindow {
     background-color: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
                                       stop: 0 #cbfbcf, stop: 1 #9af39c);
 }
 
 QTextEdit {
-    background-color: #FFFFFF; /* Fondo blanco */
-    color: #333333; /* Texto gris oscuro */
-    border: 1px solid #D3D3D3; /* Borde gris claro */
+    background-color: #FFFFFF; 
+    color: #333333; 
+    border: 1px solid #D3D3D3;
     border-radius: 5px;
     padding: 10px;
     font-size: 14px;
 }
 
-/* Estilo para cuando el cuadro de texto está seleccionado (en foco) */
 QTextEdit:focus {
-    border: 1px solid #3498db; /* Borde azul (como el botón de cargar) */
+    border: 1px solid #3498db;
 }
